@@ -4,83 +4,196 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
 
-    <!-- A-Frame (pinned version, Safari safe) -->
-    <script src="https://cdn.jsdelivr.net/npm/aframe@1.3.0/dist/aframe.min.js"
-            crossorigin="anonymous"></script>
+    <!-- Use versions aligned with AR.js location-based docs (3.4.x era) -->
+    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/three.js/build/ar-threex-location-only.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/aframe/build/aframe-ar.js"></script>
 
-    <!-- AR.js (pinned, matching build) -->
-    <script src="https://cdn.jsdelivr.net/npm/ar.js@3.4.5/aframe/build/aframe-ar.js"
-            crossorigin="anonymous"></script>
+    <!-- Optional: animation-mixer support -->
+    <script src="https://raw.githack.com/donmccurdy/aframe-extras/v7.5.3/dist/aframe-extras.loaders.min.js"></script>
 
     <style>
       body { margin:0; overflow:hidden; background:#000; }
-      #panel {
-        position: fixed;
-        left: 10px;
-        top: 10px;
-        z-index: 9999;
-        background: rgba(0,0,0,0.75);
-        color: #fff;
-        padding: 10px 12px;
-        border-radius: 10px;
-        font-size: 12px;
-        font-family: system-ui, sans-serif;
-        white-space: pre-wrap;
+      #panel{
+        position:fixed; left:10px; top:10px; z-index:9999;
+        background:rgba(0,0,0,0.75); color:#fff;
+        padding:10px 12px; border-radius:10px;
+        font:12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        max-width:calc(100vw - 20px);
+        white-space:pre-wrap;
+      }
+      #startBtn{
+        position:fixed; right:10px; top:10px; z-index:10000;
+        padding:10px 12px; border-radius:10px;
+        border:0; background:rgba(255,255,255,0.92); color:#000;
+        font-size:14px;
       }
     </style>
+
+    <script>
+      // Auto-center + auto-scale any glTF so it becomes visible (fixes tiny scale / bad pivot).
+      AFRAME.registerComponent('autoscale-center', {
+        schema: {
+          targetSizeMeters: { type: 'number', default: 1.5 } // final biggest dimension ~1.5m
+        },
+        init: function () {
+          this.el.addEventListener('model-loaded', () => {
+            const obj = this.el.getObject3D('mesh');
+            if (!obj) return;
+
+            // Compute bounding box
+            const box = new THREE.Box3().setFromObject(obj);
+            const size = new THREE.Vector3();
+            const center = new THREE.Vector3();
+            box.getSize(size);
+            box.getCenter(center);
+
+            const maxDim = Math.max(size.x, size.y, size.z);
+            if (!isFinite(maxDim) || maxDim === 0) return;
+
+            // Center the mesh at origin (fixes far-away pivots)
+            obj.position.sub(center);
+
+            // Scale to target size
+            const s = this.data.targetSizeMeters / maxDim;
+            this.el.object3D.scale.setScalar(s);
+
+            // Force materials visible (helps when backface culling or transparency breaks)
+            obj.traverse(n => {
+              if (n.isMesh && n.material) {
+                n.material.side = THREE.DoubleSide;
+                n.material.transparent = false;
+                n.material.opacity = 1;
+                n.material.needsUpdate = true;
+              }
+            });
+          });
+        }
+      });
+    </script>
   </head>
 
   <body>
+    <button id="startBtn">Tap to start</button>
     <div id="panel">loading…</div>
 
     <a-scene
       embedded
       vr-mode-ui="enabled:false"
       renderer="alpha:true; antialias:true"
-      arjs="sourceType: webcam; videoTexture:true; facingMode:environment; debugUIEnabled:false; gpsMinDistance:0; gpsTimeInterval:1000;"
+      arjs="sourceType: webcam; videoTexture: true; facingMode: environment; debugUIEnabled: false;"
     >
-      <!-- CONTROL BOX: must ALWAYS show -->
-      <a-box
-        position="0 1.6 -2"
-        depth="0.6" height="0.6" width="0.6"
-        color="yellow"
-      ></a-box>
+      <a-assets>
+        <!-- Your GLB (make sure this path exists on GitHub Pages) -->
+        <a-asset-item id="model" src="./assets/ice_cream_girl.glb"></a-asset-item>
+      </a-assets>
 
-      <!-- GPS BOX -->
-      <a-box
-        gps-entity-place="latitude: 34.840041; longitude: 134.161985;"
-        position="0 1.6 -3"
-        depth="2" height="2" width="2"
+      <!-- CAMERA: use gps-new-camera (more reliable) -->
+      <a-camera gps-new-camera="gpsMinDistance: 0" rotation-reader></a-camera>
+
+      <!-- 1) CONTROL OBJECT (NOT GPS) - must ALWAYS appear in front of you -->
+      <a-box id="controlBox" position="0 1.6 -2" depth="0.6" height="0.6" width="0.6" color="yellow"></a-box>
+
+      <!-- 2) FIXED TARGET MARKER (GPS) - a huge pillar at your target coordinate -->
+      <a-cylinder
+        id="targetPillar"
+        gps-new-entity-place="latitude: 34.840041; longitude: 134.161985;"
+        position="0 10 0"
+        radius="2"
+        height="20"
         color="red"
-      ></a-box>
+      ></a-cylinder>
 
-      <a-camera gps-camera rotation-reader></a-camera>
+      <!-- 3) YOUR GLB AT FIXED TARGET COORD (auto-scaled/centered) -->
+      <a-entity
+        id="targetModel"
+        gps-new-entity-place="latitude: 34.840041; longitude: 134.161985;"
+        gltf-model="#model"
+        autoscale-center="targetSizeMeters: 1.8"
+        position="0 0 0"
+        rotation="0 180 0"
+        animation-mixer="loop: repeat"
+      ></a-entity>
+
+      <!-- 4) DYNAMIC “IN FRONT OF ME” SPAWN (GPS) - created by JS after GPS fix -->
+      <!-- This guarantees you can see *something* even if the fixed coordinate is wrong. -->
     </a-scene>
 
     <script>
       const panel = document.getElementById("panel");
+      const startBtn = document.getElementById("startBtn");
 
-      window.onerror = function (msg, src, line, col) {
+      function line(k, v){ return `${k}: ${v}\n`; }
+
+      // iOS: user gesture helps stabilize camera start
+      startBtn.addEventListener("click", async () => {
+        startBtn.style.display = "none";
+        try {
+          await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+        } catch (e) {
+          // Still continue; AR.js may already have camera permission.
+        }
+      });
+
+      // Update panel with camera + asset status
+      function updatePanel(extra=""){
+        const vid = document.querySelector("video");
+        const vidState = vid ? `present (readyState=${vid.readyState}, paused=${vid.paused})` : "NOT FOUND";
+        const modelSrc = (document.getElementById("model") || {}).getAttribute?.("src") || "(none)";
         panel.textContent =
-          "JS ERROR:\n" + msg + "\n" +
-          (src ? src + ":" + line + ":" + col : "");
-      };
+          line("URL", location.href) +
+          line("HTTPS", location.protocol) +
+          line("video", vidState) +
+          line("model src", modelSrc) +
+          (extra ? ("\n" + extra) : "");
+      }
+      setInterval(updatePanel, 800);
+      updatePanel("Tip: Yellow box must show. Red pillar + GLB are GPS-based.");
 
-      navigator.geolocation.watchPosition(
-        (p) => {
-          const { latitude, longitude, accuracy } = p.coords;
-          const vid = document.querySelector("video");
-          panel.textContent =
-            "lat: " + latitude.toFixed(6) + "\n" +
-            "lon: " + longitude.toFixed(6) + "\n" +
-            "accuracy: " + Math.round(accuracy) + "m\n" +
-            "video: " + (vid ? "OK" : "NOT FOUND");
-        },
-        (e) => {
-          panel.textContent = "GPS ERROR:\n" + e.message;
-        },
-        { enableHighAccuracy: true }
-      );
+      // Create a “10m in front of me” GPS object after first GPS fix
+      let spawned = false;
+      window.addEventListener("load", () => {
+        const cam = document.querySelector("[gps-new-camera]");
+        if (!cam) return;
+
+        cam.addEventListener("gps-camera-update-position", (e) => {
+          const lat = e.detail.position.latitude;
+          const lon = e.detail.position.longitude;
+
+          // Show your current fix
+          updatePanel(
+            "GPS FIX OK\n" +
+            "lat: " + lat.toFixed(6) + "\n" +
+            "lon: " + lon.toFixed(6) + "\n" +
+            "Now rotate 360° slowly.\n" +
+            "If you see GREEN pillar → rendering OK; fixed target may be wrong/behind.\n" +
+            "If you see RED pillar → fixed target is working.\n"
+          );
+
+          if (spawned) return;
+          spawned = true;
+
+          // Place ~10-15m north of your *current* position (guaranteed not 0m)
+          const green = document.createElement("a-cylinder");
+          green.setAttribute("color", "lime");
+          green.setAttribute("radius", "1.5");
+          green.setAttribute("height", "12");
+          green.setAttribute("position", "0 6 0");
+          green.setAttribute("gps-new-entity-place", {
+            latitude: lat + 0.00012,  // ~13m north
+            longitude: lon
+          });
+
+          document.querySelector("a-scene").appendChild(green);
+
+          const greenLabel = document.createElement("a-text");
+          greenLabel.setAttribute("value", "GREEN = dynamic (should be visible)");
+          greenLabel.setAttribute("align", "center");
+          greenLabel.setAttribute("color", "lime");
+          greenLabel.setAttribute("position", "0 12 0");
+          green.appendChild(greenLabel);
+        });
+      });
     </script>
   </body>
 </html>
