@@ -4,19 +4,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
 
-    <!-- Use ONE CDN (jsDelivr) to avoid “Script error.” / CORS hiding real errors -->
     <script src="https://cdn.jsdelivr.net/npm/aframe@1.0.4/dist/aframe.min.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/ar.js@3.3.2/aframe/build/aframe-ar.js" crossorigin="anonymous"></script>
 
     <style>
       html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
-
-      /* Make sure overlay is ALWAYS visible above the AR canvas */
       #panel {
         position: fixed;
         left: 10px;
         top: 10px;
-        z-index: 2147483647;  /* max */
+        z-index: 2147483647;
         background: rgba(0,0,0,0.85);
         color: #fff;
         padding: 10px 12px;
@@ -24,13 +21,13 @@
         font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
         white-space: pre-wrap;
         pointer-events: none;
+        max-width: calc(100vw - 20px);
       }
-
       #startBtn {
         position: fixed;
         right: 10px;
         top: 10px;
-        z-index: 2147483647;  /* max */
+        z-index: 2147483647;
         padding: 10px 12px;
         border-radius: 10px;
         border: 0;
@@ -42,9 +39,8 @@
   </head>
 
   <body>
-    <!-- If you don't see this panel, your HTML file is not the one being loaded -->
     <div id="panel">BOOTING…</div>
-    <button id="startBtn">Tap to start</button>
+    <button id="startBtn">Tap to request Camera + GPS</button>
 
     <a-scene
       embedded
@@ -52,9 +48,10 @@
       renderer="alpha:true; antialias:true"
       arjs="sourceType:webcam; videoTexture:true; facingMode:environment; debugUIEnabled:false;"
     >
-      <!-- Local control cube (always visible if A-Frame rendering is alive) -->
+      <!-- Control cube -->
       <a-box position="0 1.6 -2" depth="0.6" height="0.6" width="0.6" color="yellow"></a-box>
 
+      <!-- GPS content will be injected after permission -->
       <a-camera gps-camera rotation-reader></a-camera>
     </a-scene>
 
@@ -63,83 +60,113 @@
       const startBtn = document.getElementById("startBtn");
       const scene = document.querySelector("a-scene");
 
-      function log(txt){ panel.textContent = txt; }
+      let gotGPS = false;
+      let spawned = false;
+      let lastCoords = null;
 
-      // If this fires, you WILL see it on screen (proves JS is running)
-      log("BOOT OK\nWaiting for permissions…");
+      function vidStatus() {
+        const vid = document.querySelector("video");
+        if (!vid) return "video: NOT FOUND";
+        return `video: present (readyState=${vid.readyState}, paused=${vid.paused}, w=${vid.videoWidth}, h=${vid.videoHeight})`;
+      }
 
-      // Show errors (no more silent failures)
+      function show(msg) {
+        panel.textContent =
+          msg + "\n\n" +
+          vidStatus() + "\n" +
+          "URL: " + location.href + "\n" +
+          "protocol: " + location.protocol;
+      }
+
       window.onerror = function (msg, src, line, col) {
-        log("JS ERROR:\n" + msg + "\n" + (src ? `${src}:${line}:${col}` : ""));
+        show("JS ERROR:\n" + msg + "\n" + (src ? `${src}:${line}:${col}` : ""));
       };
       window.addEventListener("unhandledrejection", (e) => {
-        log("PROMISE REJECTION:\n" + (e.reason?.message || e.reason || "unknown"));
+        show("PROMISE REJECTION:\n" + (e.reason?.message || e.reason || "unknown"));
       });
+
+      show("BOOT OK\nTap the button to trigger permission prompts.");
+
+      async function requestCamera() {
+        try {
+          await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+          return true;
+        } catch (e) {
+          show("Camera permission FAILED:\n" + (e.name || "") + " " + (e.message || e));
+          return false;
+        }
+      }
+
+      function requestGPS() {
+        return new Promise((resolve) => {
+          navigator.geolocation.watchPosition(
+            (p) => {
+              gotGPS = true;
+              lastCoords = p.coords;
+              show(
+                "GPS OK\n" +
+                "lat: " + p.coords.latitude.toFixed(6) + "\n" +
+                "lon: " + p.coords.longitude.toFixed(6) + "\n" +
+                "accuracy: " + Math.round(p.coords.accuracy) + "m\n\n" +
+                "Rotate 360° slowly after pillars spawn."
+              );
+
+              if (!spawned) {
+                spawned = true;
+
+                // Spawn 4 big pillars around your CURRENT location (~20m away)
+                const lat = p.coords.latitude;
+                const lon = p.coords.longitude;
+                const dLat = 0.00018;
+                const dLon = 0.00022;
+
+                const targets = [
+                  { la: lat + dLat, lo: lon,        c: "red",    name: "N" },
+                  { la: lat - dLat, lo: lon,        c: "green",  name: "S" },
+                  { la: lat,        lo: lon + dLon, c: "blue",   name: "E" },
+                  { la: lat,        lo: lon - dLon, c: "orange", name: "W" },
+                ];
+
+                targets.forEach(t => {
+                  const pillar = document.createElement("a-cylinder");
+                  pillar.setAttribute("gps-entity-place", { latitude: t.la, longitude: t.lo });
+                  pillar.setAttribute("position", "0 10 0");
+                  pillar.setAttribute("radius", "2");
+                  pillar.setAttribute("height", "20");
+                  pillar.setAttribute("color", t.c);
+
+                  const label = document.createElement("a-text");
+                  label.setAttribute("value", t.name);
+                  label.setAttribute("align", "center");
+                  label.setAttribute("color", "#fff");
+                  label.setAttribute("position", "0 12 0");
+                  pillar.appendChild(label);
+
+                  scene.appendChild(pillar);
+                });
+              }
+
+              resolve(true);
+            },
+            (e) => {
+              // This is the key: show exact iOS denial reason
+              show("GPS ERROR:\n" + e.code + " - " + e.message + "\n\nFix:\n- iPhone Settings → Privacy & Security → Location Services → ON\n- Safari Websites → Location → Allow\n- Ensure Precise Location is ON");
+              resolve(false);
+            },
+            { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+          );
+        });
+      }
 
       startBtn.addEventListener("click", async () => {
         startBtn.style.display = "none";
-        try {
-          await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio:false });
-          log("Camera permission OK.\nWaiting for GPS fix…");
-        } catch (e) {
-          log("getUserMedia failed:\n" + (e.name || "") + " " + (e.message || e));
-        }
-      });
+        show("Requesting Camera + GPS…");
 
-      let spawned = false;
+        // Request camera first (helps iOS)
+        await requestCamera();
 
-      window.addEventListener("load", () => {
-        const cam = document.querySelector("[gps-camera]");
-        if (!cam) {
-          log("ERROR: gps-camera not found.\nAR.js did not initialize.");
-          return;
-        }
-
-        log("AR.js loaded.\nTap 'Tap to start' then allow Camera + Location.");
-
-        cam.addEventListener("gps-camera-update-position", (e) => {
-          const lat = e.detail.position.latitude;
-          const lon = e.detail.position.longitude;
-
-          log(
-            "GPS FIX OK\n" +
-            "lat: " + lat.toFixed(6) + "\n" +
-            "lon: " + lon.toFixed(6) + "\n\n" +
-            "Spawning 4 huge pillars ~20m away.\nRotate 360° slowly."
-          );
-
-          if (spawned) return;
-          spawned = true;
-
-          // ~20m offsets (approx)
-          const dLat = 0.00018;
-          const dLon = 0.00022;
-
-          const targets = [
-            { la: lat + dLat, lo: lon,        c: "red",    name: "N" },
-            { la: lat - dLat, lo: lon,        c: "green",  name: "S" },
-            { la: lat,        lo: lon + dLon, c: "blue",   name: "E" },
-            { la: lat,        lo: lon - dLon, c: "orange", name: "W" },
-          ];
-
-          targets.forEach(t => {
-            const pillar = document.createElement("a-cylinder");
-            pillar.setAttribute("gps-entity-place", { latitude: t.la, longitude: t.lo });
-            pillar.setAttribute("position", "0 10 0");
-            pillar.setAttribute("radius", "2");
-            pillar.setAttribute("height", "20");
-            pillar.setAttribute("color", t.c);
-
-            const label = document.createElement("a-text");
-            label.setAttribute("value", t.name);
-            label.setAttribute("align", "center");
-            label.setAttribute("color", "#fff");
-            label.setAttribute("position", "0 12 0");
-            pillar.appendChild(label);
-
-            scene.appendChild(pillar);
-          });
-        });
+        // Then request GPS (forces prompt)
+        await requestGPS();
       });
     </script>
   </body>
