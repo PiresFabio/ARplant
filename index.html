@@ -40,9 +40,9 @@
     </style>
 
     <script>
-      // Auto-center + auto-scale any glTF so it's visible even if tiny / pivot is far away.
+      // Auto-center + auto-scale a glTF so it's visible.
       AFRAME.registerComponent('autoscale-center', {
-        schema: { targetSizeMeters: { type: 'number', default: 1.6 } }, // make largest dimension ~1.6m
+        schema: { targetSizeMeters: { type: 'number', default: 1.6 } },
         init: function () {
           this.el.addEventListener('model-loaded', () => {
             const obj = this.el.getObject3D('mesh');
@@ -57,22 +57,27 @@
             const maxDim = Math.max(size.x, size.y, size.z);
             if (!isFinite(maxDim) || maxDim === 0) return;
 
-            // center mesh at origin
-            obj.position.sub(center);
-
-            // scale to target size
+            obj.position.sub(center); // center pivot
             const s = this.data.targetSizeMeters / maxDim;
             this.el.object3D.scale.setScalar(s);
 
-            // ensure visibility
             obj.traverse(n => {
               if (n.isMesh && n.material) {
                 n.material.side = THREE.DoubleSide;
-                n.material.transparent = false;
-                n.material.opacity = 1;
                 n.material.needsUpdate = true;
               }
             });
+          });
+        }
+      });
+
+      // Simple component that lets us set gps-entity-place via JS once we know nearTarget
+      AFRAME.registerComponent('set-gps-place', {
+        schema: {},
+        init: function () {
+          this.el.sceneEl.addEventListener('near-target-ready', (e) => {
+            const { lat, lon } = e.detail;
+            this.el.setAttribute('gps-entity-place', { latitude: lat, longitude: lon });
           });
         }
       });
@@ -86,25 +91,36 @@
 
     <a-scene embedded vr-mode-ui="enabled:false" renderer="alpha:true; antialias:true">
       <a-assets>
-        <!-- ✅ Put your GLB here (path must be correct on GitHub Pages) -->
         <a-asset-item id="myModel" src="./assets/ice_cream_girl.glb"></a-asset-item>
       </a-assets>
 
-      <!-- Replace the yellow cube with YOUR GLB in camera space -->
-      <a-entity id="pointerRig" position="0 1.4 -2">
-        <!-- Your GLB should appear 2m in front of you -->
+      <!-- ✅ Local GLB sanity check (always visible) -->
+      <a-entity position="0 1.4 -2">
         <a-entity
-          id="testModel"
+          gltf-model="#myModel"
+          autoscale-center="targetSizeMeters: 0.8"
+          rotation="0 180 0"
+        ></a-entity>
+      </a-entity>
+
+      <!-- ✅ GPS GLB (3m away target) -->
+      <a-entity id="gpsTargetGroup" set-gps-place>
+        <!-- Big helper pillar so you can find the GPS anchor -->
+        <a-cylinder position="0 6 0" radius="0.8" height="12" color="lime"></a-cylinder>
+
+        <!-- Big ring at ground level -->
+        <a-ring position="0 0.1 0" rotation="-90 0 0" radius-inner="1.6" radius-outer="1.8" color="lime" opacity="0.85"></a-ring>
+
+        <!-- Your GLB at the same GPS anchor -->
+        <a-entity
+          id="gpsModel"
           gltf-model="#myModel"
           autoscale-center="targetSizeMeters: 1.6"
           rotation="0 180 0"
+          position="0 0 0"
         ></a-entity>
-
-        <!-- Small helper ring so you know where "front" is -->
-        <a-ring position="0 0 -0.2" radius-inner="0.65" radius-outer="0.67" color="white" opacity="0.55"></a-ring>
       </a-entity>
 
-      <!-- Keep camera + GPS so your overlay can still run if needed -->
       <a-camera gps-camera rotation-reader></a-camera>
     </a-scene>
 
@@ -113,11 +129,18 @@
       const panel = document.getElementById("panel");
       const startBtn = document.getElementById("startBtn");
 
+      const TARGET_REAL = { lat: 34.840041, lon: 134.161985 }; // keep for later
+      const NEAR_DISTANCE_METERS = 3;
+
+      const toRad = d => d * Math.PI / 180;
+
       function show(msg){ panel.textContent = msg; }
 
-      window.onerror = function (msg, src, line, col) {
-        show("JS ERROR:\n" + msg + "\n" + (src ? `${src}:${line}:${col}` : ""));
-      };
+      function makeOffsetEast(lat, lon, metersEast) {
+        const metersPerDegLon = 111320 * Math.cos(toRad(lat));
+        const dLon = metersEast / metersPerDegLon;
+        return { lat, lon: lon + dLon };
+      }
 
       async function requestMotionPermissionIfNeeded() {
         try {
@@ -138,9 +161,11 @@
         bgVideo.srcObject = stream;
       }
 
+      let nearTarget = null;
+      let fired = false;
+
       startBtn.addEventListener("click", async () => {
         startBtn.style.display = "none";
-
         await requestMotionPermissionIfNeeded();
 
         try {
@@ -150,23 +175,57 @@
           return;
         }
 
-        show(
-          "Camera OK.\n" +
-          "Your GLB should be 2m in front of you.\n\n" +
-          "If you DON'T see it:\n" +
-          "- the path is wrong OR\n" +
-          "- the GLB has no visible mesh/materials."
+        show("Camera OK.\nWaiting for GPS fix…");
+
+        navigator.geolocation.watchPosition(
+          (p) => {
+            const { latitude, longitude, accuracy } = p.coords;
+
+            if (!nearTarget) {
+              nearTarget = makeOffsetEast(latitude, longitude, NEAR_DISTANCE_METERS);
+
+              // Broadcast to A-Frame entities so they set gps-entity-place
+              document.querySelector("a-scene").emit("near-target-ready", {
+                lat: nearTarget.lat,
+                lon: nearTarget.lon
+              });
+
+              fired = true;
+            }
+
+            show(
+              "GPS OK\n" +
+              "YOU\n" +
+              `lat: ${latitude.toFixed(6)}\n` +
+              `lon: ${longitude.toFixed(6)}\n` +
+              `accuracy: ${Math.round(accuracy)}m\n\n` +
+              "NEAR TARGET (~3m east)\n" +
+              `lat: ${nearTarget.lat.toFixed(6)}\n` +
+              `lon: ${nearTarget.lon.toFixed(6)}\n\n` +
+              "Now rotate 360° slowly.\n" +
+              "Look for GREEN pillar/ring + the GLB."
+            );
+          },
+          (e) => show("GPS ERROR: " + e.message),
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
         );
       });
 
-      // Report model load status in panel
-      const testModel = document.getElementById("testModel");
-      testModel.addEventListener("model-loaded", () => {
-        show("MODEL LOADED ✅\nIf you still can’t see it, it’s likely tiny / pivot / materials.\n(autoscale-center should fix tiny/pivot).");
-      });
-      testModel.addEventListener("model-error", (e) => {
-        show("MODEL ERROR ❌\nCould not load GLB.\nCheck path:\n./assets/ice_cream_girl.glb\n\n" + (e?.detail?.src || ""));
-      });
+      // Tap to reset the near target around your current position (super helpful)
+      document.addEventListener("click", () => {
+        if (!fired) return;
+        navigator.geolocation.getCurrentPosition(
+          (p) => {
+            nearTarget = makeOffsetEast(p.coords.latitude, p.coords.longitude, NEAR_DISTANCE_METERS);
+            document.querySelector("a-scene").emit("near-target-ready", {
+              lat: nearTarget.lat,
+              lon: nearTarget.lon
+            });
+          },
+          () => {},
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 8000 }
+        );
+      }, { passive: true });
     </script>
   </body>
 </html>
