@@ -10,23 +10,25 @@
     <style>
       body { margin:0; overflow:hidden; background:#000; }
       #panel {
-        position: fixed;
-        left: 10px;
-        top: 10px;
-        z-index: 9999;
-        background: rgba(0,0,0,0.75);
-        color: #fff;
-        padding: 10px 12px;
-        border-radius: 10px;
-        font-size: 12px;
-        font-family: system-ui, sans-serif;
+        position: fixed; left: 10px; top: 10px; z-index: 9999;
+        background: rgba(0,0,0,0.75); color: #fff;
+        padding: 10px 12px; border-radius: 10px;
+        font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        max-width: calc(100vw - 20px);
         white-space: pre-wrap;
+      }
+      #startBtn {
+        position: fixed; right: 10px; top: 10px; z-index: 10000;
+        padding: 10px 12px; border-radius: 10px;
+        border: 0; background: rgba(255,255,255,0.92); color: #000;
+        font-size: 14px;
       }
     </style>
   </head>
 
   <body>
-    <div id="panel">waiting for GPS…</div>
+    <button id="startBtn">Tap to start</button>
+    <div id="panel">loading…</div>
 
     <a-scene
       embedded
@@ -34,34 +36,130 @@
       renderer="alpha:true; antialias:true; logarithmicDepthBuffer:true;"
       arjs="sourceType:webcam; videoTexture:true; facingMode:environment; debugUIEnabled:false; gpsMinDistance:0; gpsTimeInterval:1000;"
     >
-      <!-- GUARANTEED visible red cube -->
-      <a-box
-        gps-entity-place="latitude: 34.840041; longitude: 134.161985;"
-        position="0 1.6 -3"
-        depth="2"
-        height="2"
-        width="2"
-        color="red"
+      <!-- ✅ CONTROL BOX (NOT GPS): if you DON'T see this, rendering is broken -->
+      <a-box id="controlBox"
+        position="0 1.6 -2"
+        depth="0.6" height="0.6" width="0.6"
+        color="yellow"
       ></a-box>
 
-      <a-camera gps-camera></a-camera>
+      <!-- 🎯 TARGET LAT/LON -->
+      <!-- If GPS-placement is working, you should see at least ONE of these huge red pillars. -->
+      <!-- Offsets are ~11m (0.0001 deg latitude) and ~9m (0.0001 deg longitude at your latitude). -->
+
+      <!-- Center -->
+      <a-cylinder
+        gps-entity-place="latitude: 34.840041; longitude: 134.161985;"
+        position="0 10 0"
+        radius="2"
+        height="20"
+        color="red"
+      ></a-cylinder>
+
+      <!-- North -->
+      <a-cylinder
+        gps-entity-place="latitude: 34.840141; longitude: 134.161985;"
+        position="0 10 0"
+        radius="2"
+        height="20"
+        color="red"
+      ></a-cylinder>
+
+      <!-- South -->
+      <a-cylinder
+        gps-entity-place="latitude: 34.839941; longitude: 134.161985;"
+        position="0 10 0"
+        radius="2"
+        height="20"
+        color="red"
+      ></a-cylinder>
+
+      <!-- East -->
+      <a-cylinder
+        gps-entity-place="latitude: 34.840041; longitude: 134.162085;"
+        position="0 10 0"
+        radius="2"
+        height="20"
+        color="red"
+      ></a-cylinder>
+
+      <!-- West -->
+      <a-cylinder
+        gps-entity-place="latitude: 34.840041; longitude: 134.161885;"
+        position="0 10 0"
+        radius="2"
+        height="20"
+        color="red"
+      ></a-cylinder>
+
+      <a-camera gps-camera rotation-reader></a-camera>
     </a-scene>
 
     <script>
       const panel = document.getElementById("panel");
+      const startBtn = document.getElementById("startBtn");
+
+      const TARGET_LAT = 34.840041;
+      const TARGET_LON = 134.161985;
+
+      function distMeters(lat1, lon1, lat2, lon2) {
+        const R = 6371000;
+        const toRad = d => d * Math.PI / 180;
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+        const a =
+          Math.sin(dLat/2) * Math.sin(dLat/2) +
+          Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+          Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+      }
+
+      // Show JS errors on-screen
+      window.addEventListener("error", (e) => {
+        panel.textContent =
+          "JS ERROR:\n" + (e.message || "unknown") +
+          (e.filename ? `\n${e.filename}:${e.lineno}:${e.colno}` : "");
+      });
+
+      window.addEventListener("unhandledrejection", (e) => {
+        panel.textContent =
+          "PROMISE REJECTION:\n" + (e.reason ? (e.reason.message || e.reason) : "unknown");
+      });
+
+      // iOS often needs a gesture; harmless elsewhere.
+      startBtn.addEventListener("click", async () => {
+        startBtn.style.display = "none";
+        try {
+          await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+        } catch (_) {}
+      });
 
       navigator.geolocation.watchPosition(
         (p) => {
           const { latitude, longitude, accuracy } = p.coords;
+          const d = distMeters(latitude, longitude, TARGET_LAT, TARGET_LON);
+
+          const vid = document.querySelector("video");
+          const vidState = vid ? `readyState=${vid.readyState}, paused=${vid.paused}` : "NOT FOUND";
+
           panel.textContent =
-            "lat: " + latitude.toFixed(6) + "\n" +
-            "lon: " + longitude.toFixed(6) + "\n" +
-            "accuracy: " + Math.round(accuracy) + "m";
+            "CONTROL TEST: Do you see the YELLOW cube in front of you?\n" +
+            "If YES → rendering OK, GPS placement is the issue.\n" +
+            "If NO  → A-Frame objects are not rendering.\n\n" +
+            `lat: ${latitude.toFixed(6)}\n` +
+            `lon: ${longitude.toFixed(6)}\n` +
+            `accuracy: ${Math.round(accuracy)}m\n` +
+            `distance to target: ${Math.round(d)}m\n` +
+            `video: ${vidState}\n\n` +
+            "Look around 360° slowly. The RED pillars are huge and 20m tall.\n" +
+            "If you can’t see any red pillar but you DO see the yellow cube,\n" +
+            "your GPS anchor is behind you / drifting. Keep rotating and walk a few meters.";
         },
         (e) => {
-          panel.textContent = "GPS ERROR:\n" + e.message;
+          panel.textContent = "GEOLOCATION ERROR:\n" + e.message;
         },
-        { enableHighAccuracy: true }
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
       );
     </script>
   </body>
