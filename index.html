@@ -2,7 +2,6 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
 
     <script src="https://aframe.io/releases/1.0.4/aframe.min.js"></script>
@@ -11,25 +10,23 @@
     <style>
       body { margin:0; overflow:hidden; background:#000; }
       #panel {
-        position: fixed; left: 10px; top: 10px; z-index: 9999;
-        background: rgba(0,0,0,0.75); color: #fff;
-        padding: 10px 12px; border-radius: 10px;
-        font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        max-width: calc(100vw - 20px);
+        position: fixed;
+        left: 10px;
+        top: 10px;
+        z-index: 9999;
+        background: rgba(0,0,0,0.75);
+        color: #fff;
+        padding: 10px 12px;
+        border-radius: 10px;
+        font-size: 12px;
+        font-family: system-ui, sans-serif;
         white-space: pre-wrap;
-      }
-      #startBtn {
-        position: fixed; right: 10px; top: 10px; z-index: 10000;
-        padding: 10px 12px; border-radius: 10px;
-        border: 0; background: rgba(255,255,255,0.9); color: #000;
-        font-size: 14px;
       }
     </style>
   </head>
 
   <body>
-    <button id="startBtn">Tap to start</button>
-    <div id="panel">loading…</div>
+    <div id="panel">waiting for GPS…</div>
 
     <a-scene
       embedded
@@ -37,96 +34,35 @@
       renderer="alpha:true; antialias:true; logarithmicDepthBuffer:true;"
       arjs="sourceType:webcam; videoTexture:true; facingMode:environment; debugUIEnabled:false; gpsMinDistance:0; gpsTimeInterval:1000;"
     >
-      <a-assets>
-        <a-asset-item id="model" src="./assets/ice_cream_girl.glb"></a-asset-item>
-      </a-assets>
-
-      <!-- ✅ Red box (proves GPS + render works) -->
+      <!-- GUARANTEED visible red cube -->
       <a-box
         gps-entity-place="latitude: 34.840041; longitude: 134.161985;"
         position="0 1.6 -3"
-        depth="2" height="2" width="2"
+        depth="2"
+        height="2"
+        width="2"
         color="red"
       ></a-box>
 
-      <!-- ✅ GLB wrapper (fixes pivot/scale/visibility issues) -->
-      <a-entity
-        gps-entity-place="latitude: 34.840193956918114; 134.1621670375518;"
-        position="0 0 0"
-      >
-        <a-entity
-          gltf-model="#model"
-          position="0 1.6 -3"
-          scale="100 100 100"
-          rotation="0 180 0"
-          material="side: double; transparent: false; opacity: 1"
-        ></a-entity>
-      </a-entity>
-
-      <a-camera gps-camera rotation-reader></a-camera>
+      <a-camera gps-camera></a-camera>
     </a-scene>
 
     <script>
       const panel = document.getElementById("panel");
-      const startBtn = document.getElementById("startBtn");
-      const asset = document.getElementById("model");
 
-      function line(label, value) { return `${label}: ${value}\n`; }
-
-      window.addEventListener("error", (e) => {
-        panel.textContent =
-          "JS ERROR:\n" +
-          (e.message || "unknown") +
-          (e.filename ? `\n${e.filename}:${e.lineno}:${e.colno}` : "");
-      });
-
-      window.addEventListener("unhandledrejection", (e) => {
-        panel.textContent =
-          "PROMISE REJECTION:\n" +
-          (e.reason ? (e.reason.message || e.reason) : "unknown");
-      });
-
-      // Show model load events (helps confirm GLB path is correct)
-      asset.addEventListener("loaded", () => {
-        panel.textContent += "\nMODEL TAG LOADED (asset-item)\n";
-      });
-
-      // GPS + camera status
       navigator.geolocation.watchPosition(
         (p) => {
           const { latitude, longitude, accuracy } = p.coords;
-          const vid = document.querySelector("video");
-          const vidState = vid
-            ? `present, readyState=${vid.readyState}, paused=${vid.paused}`
-            : "NOT FOUND";
-
           panel.textContent =
-            line("URL", location.href) +
-            line("HTTPS", location.protocol) +
-            line("GPS lat", latitude.toFixed(6)) +
-            line("GPS lon", longitude.toFixed(6)) +
-            line("Accuracy", Math.round(accuracy) + "m") +
-            line("Video", vidState) +
-            line("Model src", asset.getAttribute("src"));
+            "lat: " + latitude.toFixed(6) + "\n" +
+            "lon: " + longitude.toFixed(6) + "\n" +
+            "accuracy: " + Math.round(accuracy) + "m";
         },
         (e) => {
-          panel.textContent = "GEOLOCATION ERROR:\n" + e.message;
+          panel.textContent = "GPS ERROR:\n" + e.message;
         },
-        { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+        { enableHighAccuracy: true }
       );
-
-      // iOS often needs a user gesture to start camera reliably
-      startBtn.addEventListener("click", async () => {
-        startBtn.style.display = "none";
-        try {
-          await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: "environment" },
-            audio: false
-          });
-        } catch (e) {
-          // If blocked, you’ll usually see it in the panel (Video: NOT FOUND / paused=true)
-        }
-      });
     </script>
   </body>
 </html>
