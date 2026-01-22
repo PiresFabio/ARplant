@@ -8,55 +8,28 @@
     <script src="https://cdn.jsdelivr.net/npm/ar.js@3.3.2/aframe/build/aframe-ar.js" crossorigin="anonymous"></script>
 
     <style>
-      html, body {
-        margin:0; padding:0; width:100%; height:100%;
-        overflow:hidden; background:#000;
-      }
-
-      /* Manual camera background (stable) */
-      #bgVideo {
-        position: fixed; inset: 0;
-        width: 100vw; height: 100vh;
-        object-fit: cover;
-        z-index: 1;
-      }
-
-      /* A-Frame overlay */
-      a-scene {
-        position: fixed !important;
-        inset: 0 !important;
-        z-index: 2 !important;
-      }
+      html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
+      #bgVideo { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; }
+      a-scene { position: fixed !important; inset: 0 !important; z-index: 2 !important; }
 
       #panel {
-        position: fixed;
-        left: 10px;
-        top: 10px;
-        z-index: 999999;
-        background: rgba(0,0,0,0.8);
-        color: #fff;
-        padding: 10px 12px;
-        border-radius: 10px;
+        position: fixed; left: 10px; top: 10px; z-index: 999999;
+        background: rgba(0,0,0,0.8); color: #fff;
+        padding: 10px 12px; border-radius: 10px;
         font: 12px/1.4 system-ui, sans-serif;
         white-space: pre-wrap;
       }
       #startBtn {
-        position: fixed;
-        right: 10px;
-        top: 10px;
-        z-index: 999999;
-        padding: 10px 14px;
-        border: 0;
-        border-radius: 10px;
-        background: #fff;
-        font-size: 14px;
+        position: fixed; right: 10px; top: 10px; z-index: 999999;
+        padding: 10px 14px; border: 0; border-radius: 10px;
+        background: #fff; font-size: 14px;
       }
     </style>
 
     <script>
-      // Auto center + scale GLB (keeps it visible)
+      // Auto center + scale GLB to a target physical size (meters-ish)
       AFRAME.registerComponent('autoscale-center', {
-        schema: { size: { type: 'number', default: 1.6 } },
+        schema: { size: { type: 'number', default: 6.0 } }, // ✅ bigger default
         init: function () {
           this.el.addEventListener('model-loaded', () => {
             const obj = this.el.getObject3D('mesh');
@@ -69,6 +42,8 @@
             box.getCenter(center);
 
             const max = Math.max(size.x, size.y, size.z);
+            if (!isFinite(max) || max === 0) return;
+
             obj.position.sub(center);
 
             const s = this.data.size / max;
@@ -90,34 +65,37 @@
       </a-assets>
 
       <!-- 🌍 REAL GPS ANCHOR -->
-      <a-entity
-        gps-entity-place="latitude: 34.840164; longitude: 134.162219;"
-      >
-        <!-- Tall pillar so you find it -->
+      <a-entity gps-entity-place="latitude: 34.840164; longitude: 134.162219;">
+
+        <!-- ✅ SUPER TALL “lighthouse” pillar -->
+        <!-- height 40m, center at y=20 so base touches ground -->
         <a-cylinder
-          position="0 8 0"
-          radius="0.6"
-          height="16"
+          position="0 20 0"
+          radius="2.0"
+          height="40"
           color="lime"
+          opacity="0.95"
         ></a-cylinder>
 
-        <!-- Ground ring -->
+        <!-- ✅ Bigger ground ring -->
         <a-ring
           position="0 0.05 0"
           rotation="-90 0 0"
-          radius-inner="1.2"
-          radius-outer="1.4"
+          radius-inner="6"
+          radius-outer="6.5"
           color="lime"
           opacity="0.85"
         ></a-ring>
 
-        <!-- Your GLB -->
+        <!-- ✅ Your GLB: much bigger -->
         <a-entity
           gltf-model="#model"
-          autoscale-center="size: 1.6"
+          autoscale-center="size: 6.0"
+          scale="2 2 2"
           position="0 0 0"
           rotation="0 180 0"
         ></a-entity>
+
       </a-entity>
 
       <a-camera gps-camera rotation-reader></a-camera>
@@ -140,11 +118,11 @@
             panel.textContent =
               "GPS OK\n" +
               "accuracy: " + Math.round(p.coords.accuracy) + "m\n\n" +
-              "Your object is at:\n34.840164, 134.162219\n\n" +
-              "If you don't see it:\n" +
-              "- rotate 360° slowly\n" +
-              "- walk 5–15m around\n" +
-              "- accuracy < 6m is best";
+              "Object location:\n34.840164, 134.162219\n\n" +
+              "Tip:\n" +
+              "- Walk 10–30m away and look back.\n" +
+              "- Rotate slowly 360°.\n" +
+              "- With 6m accuracy, it may appear offset.";
           },
           (e) => panel.textContent = "GPS ERROR: " + e.message,
           { enableHighAccuracy: true }
