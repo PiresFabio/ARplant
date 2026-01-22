@@ -2,105 +2,31 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-
     <script src="https://aframe.io/releases/1.0.4/aframe.min.js"></script>
-    <script src="https://unpkg.com/aframe-look-at-component@0.8.0/dist/aframe-look-at-component.min.js"></script>
-    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
-    <script src="https://raw.githack.com/donmccurdy/aframe-extras/master/dist/aframe-extras.loaders.min.js"></script>
 
-    <style>
-      #debug {
-        position: fixed;
-        bottom: 10px;
-        left: 10px;
-        z-index: 9999;
-        background: rgba(0,0,0,0.7);
-        color: #fff;
-        padding: 10px 12px;
-        border-radius: 10px;
-        font-size: 12px;
-        line-height: 1.4;
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-      }
-      #debug b { font-weight: 600; }
-    </style>
+    <!-- GPS-only AR.js build -->
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-location-only.js"></script>
   </head>
 
-  <body style="margin: 0; overflow: hidden;">
-    <div id="debug">waiting for GPS…</div>
-
+  <body style="margin:0; overflow:hidden;">
     <a-scene
-      renderer="logarithmicDepthBuffer: true;"
       embedded
       vr-mode-ui="enabled: false"
-      loading-screen="enabled: false;"
-      arjs="sourceType: webcam; debugUIEnabled: false;
-            gpsMinDistance: 0; gpsTimeInterval: 1000;
-            sourceWidth: 1280; sourceHeight: 720;
-            displayWidth: 1280; displayHeight: 720;"
+      renderer="logarithmicDepthBuffer: true;"
+      arjs="sourceType: webcam; gpsMinDistance: 0; gpsTimeInterval: 1000;"
     >
-      <a-assets>
-        <a-asset-item id="animated-asset" src="assets/ice_cream_girl.glb"></a-asset-item>
-      </a-assets>
+      <!-- PURE PRIMITIVE -->
+      <a-box
+        gps-entity-place="latitude: 34.840041; longitude: 134.161985;"
+        position="0 1.6 -3"
+        depth="1"
+        height="1"
+        width="1"
+        color="red"
+      ></a-box>
 
-      <!-- GPS anchor -->
-      <a-entity gps-entity-place="latitude: 34.840041; longitude: 134.161985;">
-        <!-- Forced in-front placement (guaranteed visible when rendering works) -->
-        <a-entity
-          id="model"
-          gltf-model="#animated-asset"
-          animation-mixer="loop: repeat"
-          position="0 1.6 -3"
-          scale="10 10 10"
-        ></a-entity>
-
-        <!-- Optional: Uncomment to sanity-check rendering with a simple primitive -->
-        
-        <a-box position="0 1.6 -3" depth="1" height="1" width="1" color="red"></a-box>
-        
-      </a-entity>
-
-      <a-camera gps-camera rotation-reader></a-camera>
+      <a-camera gps-camera></a-camera>
     </a-scene>
-
-    <script>
-      // Target coordinate (edit these when you move the center)
-      const TARGET_LAT = 34.840041;
-      const TARGET_LON = 134.161985;
-
-      const debug = document.getElementById("debug");
-
-      function dist(a,b,c,d){
-        const R = 6371000;
-        const toRad = x => x * Math.PI / 180;
-        const dLat = toRad(c - a);
-        const dLon = toRad(d - b);
-        const s =
-          Math.sin(dLat/2) ** 2 +
-          Math.cos(toRad(a)) * Math.cos(toRad(c)) *
-          Math.sin(dLon/2) ** 2;
-        return 2 * R * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
-      }
-
-      navigator.geolocation.watchPosition(
-        p => {
-          const { latitude, longitude, accuracy } = p.coords;
-          const d = dist(latitude, longitude, TARGET_LAT, TARGET_LON);
-
-          debug.innerHTML = `
-            <b>lat:</b> ${latitude.toFixed(6)}<br>
-            <b>lon:</b> ${longitude.toFixed(6)}<br>
-            <b>accuracy:</b> ${Math.round(accuracy)} m<br>
-            <b>distance:</b> ${Math.round(d)} m
-          `;
-        },
-        e => {
-          debug.textContent = e.message;
-        },
-        { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
-      );
-    </script>
   </body>
 </html>
