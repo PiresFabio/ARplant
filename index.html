@@ -8,41 +8,55 @@
     <script src="https://cdn.jsdelivr.net/npm/ar.js@3.3.2/aframe/build/aframe-ar.js" crossorigin="anonymous"></script>
 
     <style>
-      html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
+      html, body {
+        margin:0; padding:0; width:100%; height:100%;
+        overflow:hidden; background:#000;
+      }
 
-      /* manual camera background */
+      /* Manual camera background (stable) */
       #bgVideo {
         position: fixed; inset: 0;
         width: 100vw; height: 100vh;
         object-fit: cover;
         z-index: 1;
-        background: #000;
       }
 
-      /* A-Frame on top */
-      a-scene { position: fixed !important; inset: 0 !important; z-index: 2 !important; }
+      /* A-Frame overlay */
+      a-scene {
+        position: fixed !important;
+        inset: 0 !important;
+        z-index: 2 !important;
+      }
 
       #panel {
-        position: fixed; left: 10px; top: 10px; z-index: 2147483647;
-        background: rgba(0,0,0,0.85); color:#fff;
-        padding: 10px 12px; border-radius: 10px;
-        font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        position: fixed;
+        left: 10px;
+        top: 10px;
+        z-index: 999999;
+        background: rgba(0,0,0,0.8);
+        color: #fff;
+        padding: 10px 12px;
+        border-radius: 10px;
+        font: 12px/1.4 system-ui, sans-serif;
         white-space: pre-wrap;
-        pointer-events: none;
-        max-width: calc(100vw - 20px);
       }
       #startBtn {
-        position: fixed; right: 10px; top: 10px; z-index: 2147483647;
-        padding: 10px 12px; border-radius: 10px;
-        border: 0; background: rgba(255,255,255,0.92);
-        color:#000; font-size: 14px;
+        position: fixed;
+        right: 10px;
+        top: 10px;
+        z-index: 999999;
+        padding: 10px 14px;
+        border: 0;
+        border-radius: 10px;
+        background: #fff;
+        font-size: 14px;
       }
     </style>
 
     <script>
-      // Auto-center + auto-scale a glTF so it's visible.
+      // Auto center + scale GLB (keeps it visible)
       AFRAME.registerComponent('autoscale-center', {
-        schema: { targetSizeMeters: { type: 'number', default: 1.6 } },
+        schema: { size: { type: 'number', default: 1.6 } },
         init: function () {
           this.el.addEventListener('model-loaded', () => {
             const obj = this.el.getObject3D('mesh');
@@ -54,30 +68,11 @@
             box.getSize(size);
             box.getCenter(center);
 
-            const maxDim = Math.max(size.x, size.y, size.z);
-            if (!isFinite(maxDim) || maxDim === 0) return;
+            const max = Math.max(size.x, size.y, size.z);
+            obj.position.sub(center);
 
-            obj.position.sub(center); // center pivot
-            const s = this.data.targetSizeMeters / maxDim;
+            const s = this.data.size / max;
             this.el.object3D.scale.setScalar(s);
-
-            obj.traverse(n => {
-              if (n.isMesh && n.material) {
-                n.material.side = THREE.DoubleSide;
-                n.material.needsUpdate = true;
-              }
-            });
-          });
-        }
-      });
-
-      // Simple component that lets us set gps-entity-place via JS once we know nearTarget
-      AFRAME.registerComponent('set-gps-place', {
-        schema: {},
-        init: function () {
-          this.el.sceneEl.addEventListener('near-target-ready', (e) => {
-            const { lat, lon } = e.detail;
-            this.el.setAttribute('gps-entity-place', { latitude: lat, longitude: lon });
           });
         }
       });
@@ -86,38 +81,42 @@
 
   <body>
     <video id="bgVideo" autoplay playsinline muted></video>
-    <div id="panel">BOOTING…</div>
-    <button id="startBtn">Tap to start</button>
+    <div id="panel">Ready</div>
+    <button id="startBtn">Start</button>
 
     <a-scene embedded vr-mode-ui="enabled:false" renderer="alpha:true; antialias:true">
       <a-assets>
-        <a-asset-item id="myModel" src="./assets/ice_cream_girl.glb"></a-asset-item>
+        <a-asset-item id="model" src="./assets/ice_cream_girl.glb"></a-asset-item>
       </a-assets>
 
-      <!-- ✅ Local GLB sanity check (always visible) -->
-      <a-entity position="0 1.4 -2">
+      <!-- 🌍 REAL GPS ANCHOR -->
+      <a-entity
+        gps-entity-place="latitude: 34.840164; longitude: 134.162219;"
+      >
+        <!-- Tall pillar so you find it -->
+        <a-cylinder
+          position="0 8 0"
+          radius="0.6"
+          height="16"
+          color="lime"
+        ></a-cylinder>
+
+        <!-- Ground ring -->
+        <a-ring
+          position="0 0.05 0"
+          rotation="-90 0 0"
+          radius-inner="1.2"
+          radius-outer="1.4"
+          color="lime"
+          opacity="0.85"
+        ></a-ring>
+
+        <!-- Your GLB -->
         <a-entity
-          gltf-model="#myModel"
-          autoscale-center="targetSizeMeters: 0.8"
-          rotation="0 180 0"
-        ></a-entity>
-      </a-entity>
-
-      <!-- ✅ GPS GLB (3m away target) -->
-      <a-entity id="gpsTargetGroup" set-gps-place>
-        <!-- Big helper pillar so you can find the GPS anchor -->
-        <a-cylinder position="0 6 0" radius="0.8" height="12" color="lime"></a-cylinder>
-
-        <!-- Big ring at ground level -->
-        <a-ring position="0 0.1 0" rotation="-90 0 0" radius-inner="1.6" radius-outer="1.8" color="lime" opacity="0.85"></a-ring>
-
-        <!-- Your GLB at the same GPS anchor -->
-        <a-entity
-          id="gpsModel"
-          gltf-model="#myModel"
-          autoscale-center="targetSizeMeters: 1.6"
-          rotation="0 180 0"
+          gltf-model="#model"
+          autoscale-center="size: 1.6"
           position="0 0 0"
+          rotation="0 180 0"
         ></a-entity>
       </a-entity>
 
@@ -129,103 +128,33 @@
       const panel = document.getElementById("panel");
       const startBtn = document.getElementById("startBtn");
 
-      const TARGET_REAL = { lat: 34.840041, lon: 134.161985 }; // keep for later
-      const NEAR_DISTANCE_METERS = 3;
-
-      const toRad = d => d * Math.PI / 180;
-
-      function show(msg){ panel.textContent = msg; }
-
-      function makeOffsetEast(lat, lon, metersEast) {
-        const metersPerDegLon = 111320 * Math.cos(toRad(lat));
-        const dLon = metersEast / metersPerDegLon;
-        return { lat, lon: lon + dLon };
-      }
-
-      async function requestMotionPermissionIfNeeded() {
-        try {
-          if (typeof DeviceOrientationEvent !== "undefined" &&
-              typeof DeviceOrientationEvent.requestPermission === "function") {
-            const res = await DeviceOrientationEvent.requestPermission();
-            return res === "granted";
-          }
-        } catch (_) {}
-        return true;
-      }
-
-      async function startCamera() {
+      async function start() {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: "environment" } },
           audio: false
         });
         bgVideo.srcObject = stream;
-      }
-
-      let nearTarget = null;
-      let fired = false;
-
-      startBtn.addEventListener("click", async () => {
-        startBtn.style.display = "none";
-        await requestMotionPermissionIfNeeded();
-
-        try {
-          await startCamera();
-        } catch (e) {
-          show("Camera failed:\n" + (e.message || e));
-          return;
-        }
-
-        show("Camera OK.\nWaiting for GPS fix…");
 
         navigator.geolocation.watchPosition(
           (p) => {
-            const { latitude, longitude, accuracy } = p.coords;
-
-            if (!nearTarget) {
-              nearTarget = makeOffsetEast(latitude, longitude, NEAR_DISTANCE_METERS);
-
-              // Broadcast to A-Frame entities so they set gps-entity-place
-              document.querySelector("a-scene").emit("near-target-ready", {
-                lat: nearTarget.lat,
-                lon: nearTarget.lon
-              });
-
-              fired = true;
-            }
-
-            show(
+            panel.textContent =
               "GPS OK\n" +
-              "YOU\n" +
-              `lat: ${latitude.toFixed(6)}\n` +
-              `lon: ${longitude.toFixed(6)}\n` +
-              `accuracy: ${Math.round(accuracy)}m\n\n` +
-              "NEAR TARGET (~3m east)\n" +
-              `lat: ${nearTarget.lat.toFixed(6)}\n` +
-              `lon: ${nearTarget.lon.toFixed(6)}\n\n` +
-              "Now rotate 360° slowly.\n" +
-              "Look for GREEN pillar/ring + the GLB."
-            );
+              "accuracy: " + Math.round(p.coords.accuracy) + "m\n\n" +
+              "Your object is at:\n34.840164, 134.162219\n\n" +
+              "If you don't see it:\n" +
+              "- rotate 360° slowly\n" +
+              "- walk 5–15m around\n" +
+              "- accuracy < 6m is best";
           },
-          (e) => show("GPS ERROR: " + e.message),
-          { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+          (e) => panel.textContent = "GPS ERROR: " + e.message,
+          { enableHighAccuracy: true }
         );
-      });
+      }
 
-      // Tap to reset the near target around your current position (super helpful)
-      document.addEventListener("click", () => {
-        if (!fired) return;
-        navigator.geolocation.getCurrentPosition(
-          (p) => {
-            nearTarget = makeOffsetEast(p.coords.latitude, p.coords.longitude, NEAR_DISTANCE_METERS);
-            document.querySelector("a-scene").emit("near-target-ready", {
-              lat: nearTarget.lat,
-              lon: nearTarget.lon
-            });
-          },
-          () => {},
-          { enableHighAccuracy: true, maximumAge: 0, timeout: 8000 }
-        );
-      }, { passive: true });
+      startBtn.addEventListener("click", () => {
+        startBtn.style.display = "none";
+        start();
+      });
     </script>
   </body>
 </html>
