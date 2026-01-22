@@ -4,157 +4,122 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
 
-    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
-    <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/three.js/build/ar-threex-location-only.js"></script>
-    <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/aframe/build/aframe-ar.js"></script>
+    <!-- Proven stable versions for iOS -->
+    <script src="https://aframe.io/releases/1.0.4/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/3.3.2/aframe/build/aframe-ar.js"></script>
 
     <style>
       body { margin:0; overflow:hidden; background:#000; }
-      #panel{
-        position:fixed; left:10px; top:10px; z-index:9999;
-        background:rgba(0,0,0,0.75); color:#fff;
-        padding:10px 12px; border-radius:10px;
-        font:12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        max-width:calc(100vw - 20px);
-        white-space:pre-wrap;
+      #panel {
+        position: fixed;
+        left: 10px;
+        top: 10px;
+        z-index: 9999;
+        background: rgba(0,0,0,0.75);
+        color: #fff;
+        padding: 10px 12px;
+        border-radius: 10px;
+        font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        white-space: pre-wrap;
       }
-      #startBtn{
-        position:fixed; right:10px; top:10px; z-index:10000;
-        padding:10px 12px; border-radius:10px;
-        border:0; background:rgba(255,255,255,0.92); color:#000;
-        font-size:14px;
+      #startBtn {
+        position: fixed;
+        right: 10px;
+        top: 10px;
+        z-index: 10000;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 0;
+        background: rgba(255,255,255,0.92);
+        color: #000;
+        font-size: 14px;
       }
     </style>
   </head>
 
   <body>
-    <button id="startBtn">Tap to enable motion</button>
-    <div id="panel">loading…</div>
+    <button id="startBtn">Tap to start</button>
+    <div id="panel">waiting…</div>
 
     <a-scene
       embedded
       vr-mode-ui="enabled:false"
       renderer="alpha:true; antialias:true"
-      arjs="sourceType: webcam; videoTexture: true; facingMode: environment; debugUIEnabled: false;"
+      arjs="sourceType: webcam; videoTexture:true; facingMode:environment; debugUIEnabled:false;"
     >
-      <!-- LOCAL CONTROL: always visible -->
+      <!-- CONTROL: must always show -->
       <a-box position="0 1.6 -2" depth="0.6" height="0.6" width="0.6" color="yellow"></a-box>
 
-      <!-- GPS camera (new). simulateAltitude helps some devices. -->
-      <a-camera
-        gps-new-camera="gpsMinDistance: 0; simulateAltitude: true;"
-        look-controls="enabled: true"
-      ></a-camera>
-
-      <!-- These 4 GPS entities will be spawned dynamically after GPS fix -->
+      <a-camera gps-camera rotation-reader></a-camera>
     </a-scene>
 
     <script>
       const panel = document.getElementById("panel");
       const startBtn = document.getElementById("startBtn");
+      const scene = document.querySelector("a-scene");
 
-      function updatePanel(extra=""){
-        const vid = document.querySelector("video");
-        const vidState = vid ? `present (readyState=${vid.readyState}, paused=${vid.paused})` : "NOT FOUND";
-        panel.textContent =
-          "video: " + vidState + "\n" +
-          "Tip: If you are on iPhone, you MUST allow Motion & Orientation.\n\n" +
-          extra;
-      }
-
-      // iOS 13+ needs permission for device orientation (compass/heading)
-      async function requestMotionPermissionIfNeeded() {
-        try {
-          if (typeof DeviceOrientationEvent !== "undefined" &&
-              typeof DeviceOrientationEvent.requestPermission === "function") {
-            const res = await DeviceOrientationEvent.requestPermission();
-            return res === "granted";
-          }
-        } catch (_) {}
-        return true; // Android / older iOS
-      }
+      function status(text){ panel.textContent = text; }
 
       startBtn.addEventListener("click", async () => {
         startBtn.style.display = "none";
-
-        // Ask for motion permission (critical for compass/heading)
-        const ok = await requestMotionPermissionIfNeeded();
-        if (!ok) {
-          updatePanel("Motion permission NOT granted.\nGPS objects may not appear.\nGo to iPhone Settings → Safari → Motion & Orientation Access = ON");
-        }
-
-        // Nudge camera permission too
-        try { await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio:false }); }
-        catch (_) {}
+        try {
+          await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio:false });
+        } catch (_) {}
       });
 
       let spawned = false;
 
       window.addEventListener("load", () => {
-        const scene = document.querySelector("a-scene");
-        const cam = document.querySelector("[gps-new-camera]");
-        if (!cam) {
-          updatePanel("No gps-new-camera found (HTML issue).");
-          return;
-        }
+        const cam = document.querySelector("[gps-camera]");
+        if (!cam) return status("gps-camera not found");
 
         cam.addEventListener("gps-camera-update-position", (e) => {
           const lat = e.detail.position.latitude;
           const lon = e.detail.position.longitude;
 
-          updatePanel(
+          status(
             "GPS FIX OK\n" +
             "lat: " + lat.toFixed(6) + "\n" +
             "lon: " + lon.toFixed(6) + "\n\n" +
-            "Spawning 4 huge BLUE pillars ~15m away (N/E/S/W)…\n" +
-            "Rotate 360° slowly."
+            "Spawning 4 huge pillars ~20m away.\nRotate slowly 360°."
           );
 
           if (spawned) return;
           spawned = true;
 
-          // ~15m offsets (rough): lat 0.000135 ~ 15m
-          const dLat = 0.000135;
-          const dLon = 0.00017; // ~15m at your latitude
+          // ~20m offsets
+          const dLat = 0.00018;
+          const dLon = 0.00022;
 
           const targets = [
-            { name: "N", la: lat + dLat, lo: lon,         color: "deepskyblue" },
-            { name: "S", la: lat - dLat, lo: lon,         color: "deepskyblue" },
-            { name: "E", la: lat,        lo: lon + dLon,  color: "deepskyblue" },
-            { name: "W", la: lat,        lo: lon - dLon,  color: "deepskyblue" },
+            { la: lat + dLat, lo: lon,         c: "red",   name: "N" },
+            { la: lat - dLat, lo: lon,         c: "green", name: "S" },
+            { la: lat,        lo: lon + dLon,  c: "blue",  name: "E" },
+            { la: lat,        lo: lon - dLon,  c: "orange",name: "W" },
           ];
 
           targets.forEach(t => {
             const pillar = document.createElement("a-cylinder");
-            pillar.setAttribute("gps-new-entity-place", { latitude: t.la, longitude: t.lo });
-            pillar.setAttribute("position", "0 8 0");
+            pillar.setAttribute("gps-entity-place", {
+              latitude: t.la,
+              longitude: t.lo
+            });
+            pillar.setAttribute("position", "0 10 0");
             pillar.setAttribute("radius", "2");
-            pillar.setAttribute("height", "16");
-            pillar.setAttribute("color", t.color);
+            pillar.setAttribute("height", "20");
+            pillar.setAttribute("color", t.c);
 
             const label = document.createElement("a-text");
-            label.setAttribute("value", "BLUE " + t.name);
+            label.setAttribute("value", t.name);
             label.setAttribute("align", "center");
-            label.setAttribute("color", t.color);
-            label.setAttribute("position", "0 16 0");
+            label.setAttribute("color", "#fff");
+            label.setAttribute("position", "0 12 0");
             pillar.appendChild(label);
 
             scene.appendChild(pillar);
           });
-
-          // Also spawn ONE object at your fixed target coordinate (red, huge)
-          const fixed = document.createElement("a-cylinder");
-          fixed.setAttribute("gps-new-entity-place", { latitude: 34.840041, longitude: 134.161985 });
-          fixed.setAttribute("position", "0 12 0");
-          fixed.setAttribute("radius", "3");
-          fixed.setAttribute("height", "24");
-          fixed.setAttribute("color", "red");
-          scene.appendChild(fixed);
         });
       });
-
-      // Keep updating video status
-      setInterval(() => updatePanel(panel.textContent.split("\n\n").slice(1).join("\n\n")), 900);
     </script>
   </body>
 </html>
