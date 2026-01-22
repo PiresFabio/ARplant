@@ -46,16 +46,13 @@
     <button id="startBtn">Tap to start</button>
 
     <a-scene embedded vr-mode-ui="enabled:false" renderer="alpha:true; antialias:true">
-      <!-- “Pointer” rig attached to camera space -->
+      <!-- Pointer rig in camera space -->
       <a-entity id="pointerRig" position="0 1.6 -2">
-        <!-- Yellow cube: we’ll rotate this to “point” toward target -->
         <a-box id="pointerBox" depth="0.35" height="0.35" width="0.8" color="yellow"></a-box>
-
-        <!-- A little cone on the front so it looks like an arrow -->
         <a-cone id="pointerTip" position="0 0 -0.6" radius-bottom="0.18" radius-top="0" height="0.35" color="yellow"></a-cone>
       </a-entity>
 
-      <!-- optional: a small horizon line so you see rotation -->
+      <!-- Local ring for reference -->
       <a-ring position="0 1.6 -2.2" radius-inner="0.45" radius-outer="0.47" color="white" opacity="0.5"></a-ring>
 
       <a-camera gps-camera rotation-reader></a-camera>
@@ -65,21 +62,22 @@
       const bgVideo = document.getElementById("bgVideo");
       const panel = document.getElementById("panel");
       const startBtn = document.getElementById("startBtn");
+      const pointerRig = document.getElementById("pointerRig");
 
-      const pointerRig = document.getElementById("pointerRig"); // we rotate this
-      const pointerBox = document.getElementById("pointerBox");
-
-      // ✅ Set your target coordinate here
+      // ✅ Your fixed target (keep this as your “real” location)
       const TARGET_LAT = 34.840041;
       const TARGET_LON = 134.161985;
 
+      // ✅ Make the “walkable” test target only 3 meters away from your CURRENT position
+      // We'll compute a "near target" once we get your first GPS fix.
+      const NEAR_DISTANCE_METERS = 3;
+
+      // internal state
+      let nearTarget = null; // {lat, lon}
+      let deviceHeading = null;
+
       function show(msg){ panel.textContent = msg; }
 
-      window.onerror = function (msg, src, line, col) {
-        show("JS ERROR:\n" + msg + "\n" + (src ? `${src}:${line}:${col}` : ""));
-      };
-
-      // ----- math helpers -----
       const toRad = d => d * Math.PI / 180;
       const toDeg = r => r * 180 / Math.PI;
 
@@ -93,32 +91,31 @@
         return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       }
 
-      // bearing from point1 to point2 (0°=North, 90°=East)
       function bearingDeg(lat1, lon1, lat2, lon2) {
         const φ1 = toRad(lat1), φ2 = toRad(lat2);
         const Δλ = toRad(lon2 - lon1);
         const y = Math.sin(Δλ) * Math.cos(φ2);
         const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
-        let θ = toDeg(Math.atan2(y, x)); // -180..180
-        θ = (θ + 360) % 360;            // 0..360
-        return θ;
+        let θ = toDeg(Math.atan2(y, x));
+        return (θ + 360) % 360;
       }
 
-      // Try to read device heading.
-      // On iOS, Geolocation heading is often null; we try DeviceOrientationEvent.
-      let deviceHeading = null; // degrees, 0..360 (0=N)
+      // Create a coordinate NEAR_DISTANCE_METERS to the EAST of current position
+      // (east = easier to reason about; you can change to north if you prefer)
+      function makeOffsetEast(lat, lon, metersEast) {
+        // longitude degrees per meter depends on latitude
+        const metersPerDegLon = 111320 * Math.cos(toRad(lat));
+        const dLon = metersEast / metersPerDegLon;
+        return { lat, lon: lon + dLon };
+      }
+
       function setupDeviceHeading() {
         window.addEventListener("deviceorientationabsolute", (e) => {
-          if (typeof e.alpha === "number") {
-            // alpha is 0..360, but depends on implementation; treat as compass heading-ish
-            deviceHeading = e.alpha;
-          }
+          if (typeof e.alpha === "number") deviceHeading = e.alpha;
         }, true);
 
         window.addEventListener("deviceorientation", (e) => {
-          if (deviceHeading == null && typeof e.alpha === "number") {
-            deviceHeading = e.alpha;
-          }
+          if (deviceHeading == null && typeof e.alpha === "number") deviceHeading = e.alpha;
         }, true);
       }
 
@@ -141,40 +138,45 @@
         bgVideo.srcObject = stream;
       }
 
-      function updatePointer(lat, lon, acc) {
-        const dist = distanceMeters(lat, lon, TARGET_LAT, TARGET_LON);
-        const brg = bearingDeg(lat, lon, TARGET_LAT, TARGET_LON); // 0=N
+      function updatePointer(meLat, meLon, meAcc) {
+        // If we haven't created the "near target" yet, create it from your first fix
+        if (!nearTarget) {
+          nearTarget = makeOffsetEast(meLat, meLon, NEAR_DISTANCE_METERS);
+        }
 
-        // If we have deviceHeading, we can point relative to where you're facing:
-        // relative = bearing - heading
-        let rel = null;
+        // Compare you → NEAR target (3m) so you can walk around it
+        const distNear = distanceMeters(meLat, meLon, nearTarget.lat, nearTarget.lon);
+        const brgNear  = bearingDeg(meLat, meLon, nearTarget.lat, nearTarget.lon);
+
+        // Also keep showing your REAL fixed target distance (for reference)
+        const distReal = distanceMeters(meLat, meLon, TARGET_LAT, TARGET_LON);
+        const brgReal  = bearingDeg(meLat, meLon, TARGET_LAT, TARGET_LON);
+
+        let relNear = null;
         if (typeof deviceHeading === "number") {
-          rel = (brg - deviceHeading + 360) % 360; // 0=forward, 90=right
-          // rotate the pointer rig around Y (A-Frame uses Y up; yaw rotation)
-          pointerRig.setAttribute("rotation", `0 ${rel} 0`);
+          relNear = (brgNear - deviceHeading + 360) % 360; // 0 forward
+          pointerRig.setAttribute("rotation", `0 ${relNear} 0`);
         } else {
-          // No heading: still show numbers; keep pointer fixed
           pointerRig.setAttribute("rotation", "0 0 0");
         }
 
-        // make pointer bigger when far, smaller when close (visual cue)
-        const s = Math.min(2.5, Math.max(0.7, dist / 20));
-        pointerRig.setAttribute("scale", `${s} ${s} ${s}`);
-
         show(
-          "TARGET\n" +
-          `lat: ${TARGET_LAT}\nlon: ${TARGET_LON}\n\n` +
-          "YOU\n" +
-          `lat: ${lat.toFixed(6)}\nlon: ${lon.toFixed(6)}\naccuracy: ${Math.round(acc)}m\n\n` +
-          `distance: ${Math.round(dist)}m\n` +
-          `bearing (N=0,E=90): ${Math.round(brg)}°\n` +
-          (rel == null
-            ? "heading: (not available) → enable Motion & Orientation\n"
-            : `heading: ${Math.round(deviceHeading)}°\nrelative: ${Math.round(rel)}° (0=forward, 90=right)\n`) +
-          "\nHow to use:\n" +
-          "- If relative is ~0°, target is straight ahead.\n" +
-          "- If ~90°, target is to your RIGHT.\n" +
-          "- If ~270°, target is to your LEFT.\n"
+          "WALKABLE TARGET (≈3m away)\n" +
+          `near lat: ${nearTarget.lat.toFixed(6)}\n` +
+          `near lon: ${nearTarget.lon.toFixed(6)}\n` +
+          `near distance: ${distNear.toFixed(1)}m\n` +
+          `near bearing: ${Math.round(brgNear)}°\n` +
+          (relNear == null ? "heading: (not available)\n" : `heading: ${Math.round(deviceHeading)}°  rel: ${Math.round(relNear)}°\n`) +
+          "\nYOU\n" +
+          `lat: ${meLat.toFixed(6)}\n` +
+          `lon: ${meLon.toFixed(6)}\n` +
+          `accuracy: ${Math.round(meAcc)}m\n\n` +
+          "REAL TARGET (your fixed coords)\n" +
+          `real distance: ${Math.round(distReal)}m\n` +
+          `real bearing: ${Math.round(brgReal)}°\n\n` +
+          "Tip:\n" +
+          "- Walk until near distance ~0–3m.\n" +
+          "- If rel ~0°, the walkable target is straight ahead.\n"
         );
       }
 
@@ -182,8 +184,6 @@
         startBtn.style.display = "none";
 
         const motionOK = await requestMotionPermissionIfNeeded();
-        if (!motionOK) show("Motion permission denied. Pointer can’t aim. Enable it in Settings.");
-
         setupDeviceHeading();
 
         try {
@@ -193,13 +193,28 @@
           return;
         }
 
-        // Force GPS permission prompt and update pointer continuously
+        // Start GPS updates
         navigator.geolocation.watchPosition(
           (p) => updatePointer(p.coords.latitude, p.coords.longitude, p.coords.accuracy),
           (e) => show("GPS ERROR: " + e.message),
           { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
         );
       });
+
+      // OPTIONAL: tap anywhere to “reset” the walkable target 3m east of your *current* location
+      // This is super useful if you walk far and want a new nearby anchor.
+      document.addEventListener("click", (ev) => {
+        // ignore the button click (already hidden after start)
+        if (!nearTarget) return;
+        // We'll reset on any tap after start:
+        navigator.geolocation.getCurrentPosition(
+          (p) => {
+            nearTarget = makeOffsetEast(p.coords.latitude, p.coords.longitude, NEAR_DISTANCE_METERS);
+          },
+          () => {},
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 8000 }
+        );
+      }, { passive: true });
     </script>
   </body>
 </html>
