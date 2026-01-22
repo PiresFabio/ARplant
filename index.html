@@ -38,6 +38,45 @@
         color:#000; font-size: 14px;
       }
     </style>
+
+    <script>
+      // Auto-center + auto-scale any glTF so it's visible even if tiny / pivot is far away.
+      AFRAME.registerComponent('autoscale-center', {
+        schema: { targetSizeMeters: { type: 'number', default: 1.6 } }, // make largest dimension ~1.6m
+        init: function () {
+          this.el.addEventListener('model-loaded', () => {
+            const obj = this.el.getObject3D('mesh');
+            if (!obj) return;
+
+            const box = new THREE.Box3().setFromObject(obj);
+            const size = new THREE.Vector3();
+            const center = new THREE.Vector3();
+            box.getSize(size);
+            box.getCenter(center);
+
+            const maxDim = Math.max(size.x, size.y, size.z);
+            if (!isFinite(maxDim) || maxDim === 0) return;
+
+            // center mesh at origin
+            obj.position.sub(center);
+
+            // scale to target size
+            const s = this.data.targetSizeMeters / maxDim;
+            this.el.object3D.scale.setScalar(s);
+
+            // ensure visibility
+            obj.traverse(n => {
+              if (n.isMesh && n.material) {
+                n.material.side = THREE.DoubleSide;
+                n.material.transparent = false;
+                n.material.opacity = 1;
+                n.material.needsUpdate = true;
+              }
+            });
+          });
+        }
+      });
+    </script>
   </head>
 
   <body>
@@ -46,15 +85,26 @@
     <button id="startBtn">Tap to start</button>
 
     <a-scene embedded vr-mode-ui="enabled:false" renderer="alpha:true; antialias:true">
-      <!-- Pointer rig in camera space -->
-      <a-entity id="pointerRig" position="0 1.6 -2">
-        <a-box id="pointerBox" depth="0.35" height="0.35" width="0.8" color="yellow"></a-box>
-        <a-cone id="pointerTip" position="0 0 -0.6" radius-bottom="0.18" radius-top="0" height="0.35" color="yellow"></a-cone>
+      <a-assets>
+        <!-- ✅ Put your GLB here (path must be correct on GitHub Pages) -->
+        <a-asset-item id="myModel" src="./assets/ice_cream_girl.glb"></a-asset-item>
+      </a-assets>
+
+      <!-- Replace the yellow cube with YOUR GLB in camera space -->
+      <a-entity id="pointerRig" position="0 1.4 -2">
+        <!-- Your GLB should appear 2m in front of you -->
+        <a-entity
+          id="testModel"
+          gltf-model="#myModel"
+          autoscale-center="targetSizeMeters: 1.6"
+          rotation="0 180 0"
+        ></a-entity>
+
+        <!-- Small helper ring so you know where "front" is -->
+        <a-ring position="0 0 -0.2" radius-inner="0.65" radius-outer="0.67" color="white" opacity="0.55"></a-ring>
       </a-entity>
 
-      <!-- Local ring for reference -->
-      <a-ring position="0 1.6 -2.2" radius-inner="0.45" radius-outer="0.47" color="white" opacity="0.5"></a-ring>
-
+      <!-- Keep camera + GPS so your overlay can still run if needed -->
       <a-camera gps-camera rotation-reader></a-camera>
     </a-scene>
 
@@ -62,62 +112,12 @@
       const bgVideo = document.getElementById("bgVideo");
       const panel = document.getElementById("panel");
       const startBtn = document.getElementById("startBtn");
-      const pointerRig = document.getElementById("pointerRig");
-
-      // ✅ Your fixed target (keep this as your “real” location)
-      const TARGET_LAT = 34.840041;
-      const TARGET_LON = 134.161985;
-
-      // ✅ Make the “walkable” test target only 3 meters away from your CURRENT position
-      // We'll compute a "near target" once we get your first GPS fix.
-      const NEAR_DISTANCE_METERS = 3;
-
-      // internal state
-      let nearTarget = null; // {lat, lon}
-      let deviceHeading = null;
 
       function show(msg){ panel.textContent = msg; }
 
-      const toRad = d => d * Math.PI / 180;
-      const toDeg = r => r * 180 / Math.PI;
-
-      function distanceMeters(lat1, lon1, lat2, lon2) {
-        const R = 6371000;
-        const dLat = toRad(lat2 - lat1);
-        const dLon = toRad(lon2 - lon1);
-        const a =
-          Math.sin(dLat/2) ** 2 +
-          Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * (Math.sin(dLon/2) ** 2);
-        return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      }
-
-      function bearingDeg(lat1, lon1, lat2, lon2) {
-        const φ1 = toRad(lat1), φ2 = toRad(lat2);
-        const Δλ = toRad(lon2 - lon1);
-        const y = Math.sin(Δλ) * Math.cos(φ2);
-        const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
-        let θ = toDeg(Math.atan2(y, x));
-        return (θ + 360) % 360;
-      }
-
-      // Create a coordinate NEAR_DISTANCE_METERS to the EAST of current position
-      // (east = easier to reason about; you can change to north if you prefer)
-      function makeOffsetEast(lat, lon, metersEast) {
-        // longitude degrees per meter depends on latitude
-        const metersPerDegLon = 111320 * Math.cos(toRad(lat));
-        const dLon = metersEast / metersPerDegLon;
-        return { lat, lon: lon + dLon };
-      }
-
-      function setupDeviceHeading() {
-        window.addEventListener("deviceorientationabsolute", (e) => {
-          if (typeof e.alpha === "number") deviceHeading = e.alpha;
-        }, true);
-
-        window.addEventListener("deviceorientation", (e) => {
-          if (deviceHeading == null && typeof e.alpha === "number") deviceHeading = e.alpha;
-        }, true);
-      }
+      window.onerror = function (msg, src, line, col) {
+        show("JS ERROR:\n" + msg + "\n" + (src ? `${src}:${line}:${col}` : ""));
+      };
 
       async function requestMotionPermissionIfNeeded() {
         try {
@@ -138,83 +138,35 @@
         bgVideo.srcObject = stream;
       }
 
-      function updatePointer(meLat, meLon, meAcc) {
-        // If we haven't created the "near target" yet, create it from your first fix
-        if (!nearTarget) {
-          nearTarget = makeOffsetEast(meLat, meLon, NEAR_DISTANCE_METERS);
-        }
-
-        // Compare you → NEAR target (3m) so you can walk around it
-        const distNear = distanceMeters(meLat, meLon, nearTarget.lat, nearTarget.lon);
-        const brgNear  = bearingDeg(meLat, meLon, nearTarget.lat, nearTarget.lon);
-
-        // Also keep showing your REAL fixed target distance (for reference)
-        const distReal = distanceMeters(meLat, meLon, TARGET_LAT, TARGET_LON);
-        const brgReal  = bearingDeg(meLat, meLon, TARGET_LAT, TARGET_LON);
-
-        let relNear = null;
-        if (typeof deviceHeading === "number") {
-          relNear = (brgNear - deviceHeading + 360) % 360; // 0 forward
-          pointerRig.setAttribute("rotation", `0 ${relNear} 0`);
-        } else {
-          pointerRig.setAttribute("rotation", "0 0 0");
-        }
-
-        show(
-          "WALKABLE TARGET (≈3m away)\n" +
-          `near lat: ${nearTarget.lat.toFixed(6)}\n` +
-          `near lon: ${nearTarget.lon.toFixed(6)}\n` +
-          `near distance: ${distNear.toFixed(1)}m\n` +
-          `near bearing: ${Math.round(brgNear)}°\n` +
-          (relNear == null ? "heading: (not available)\n" : `heading: ${Math.round(deviceHeading)}°  rel: ${Math.round(relNear)}°\n`) +
-          "\nYOU\n" +
-          `lat: ${meLat.toFixed(6)}\n` +
-          `lon: ${meLon.toFixed(6)}\n` +
-          `accuracy: ${Math.round(meAcc)}m\n\n` +
-          "REAL TARGET (your fixed coords)\n" +
-          `real distance: ${Math.round(distReal)}m\n` +
-          `real bearing: ${Math.round(brgReal)}°\n\n` +
-          "Tip:\n" +
-          "- Walk until near distance ~0–3m.\n" +
-          "- If rel ~0°, the walkable target is straight ahead.\n"
-        );
-      }
-
       startBtn.addEventListener("click", async () => {
         startBtn.style.display = "none";
 
-        const motionOK = await requestMotionPermissionIfNeeded();
-        setupDeviceHeading();
+        await requestMotionPermissionIfNeeded();
 
         try {
           await startCamera();
         } catch (e) {
-          show("Camera failed: " + (e.message || e));
+          show("Camera failed:\n" + (e.message || e));
           return;
         }
 
-        // Start GPS updates
-        navigator.geolocation.watchPosition(
-          (p) => updatePointer(p.coords.latitude, p.coords.longitude, p.coords.accuracy),
-          (e) => show("GPS ERROR: " + e.message),
-          { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+        show(
+          "Camera OK.\n" +
+          "Your GLB should be 2m in front of you.\n\n" +
+          "If you DON'T see it:\n" +
+          "- the path is wrong OR\n" +
+          "- the GLB has no visible mesh/materials."
         );
       });
 
-      // OPTIONAL: tap anywhere to “reset” the walkable target 3m east of your *current* location
-      // This is super useful if you walk far and want a new nearby anchor.
-      document.addEventListener("click", (ev) => {
-        // ignore the button click (already hidden after start)
-        if (!nearTarget) return;
-        // We'll reset on any tap after start:
-        navigator.geolocation.getCurrentPosition(
-          (p) => {
-            nearTarget = makeOffsetEast(p.coords.latitude, p.coords.longitude, NEAR_DISTANCE_METERS);
-          },
-          () => {},
-          { enableHighAccuracy: true, maximumAge: 0, timeout: 8000 }
-        );
-      }, { passive: true });
+      // Report model load status in panel
+      const testModel = document.getElementById("testModel");
+      testModel.addEventListener("model-loaded", () => {
+        show("MODEL LOADED ✅\nIf you still can’t see it, it’s likely tiny / pivot / materials.\n(autoscale-center should fix tiny/pivot).");
+      });
+      testModel.addEventListener("model-error", (e) => {
+        show("MODEL ERROR ❌\nCould not load GLB.\nCheck path:\n./assets/ice_cream_girl.glb\n\n" + (e?.detail?.src || ""));
+      });
     </script>
   </body>
 </html>
