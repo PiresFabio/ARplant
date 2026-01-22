@@ -4,23 +4,25 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
 
-    <script src="https://aframe.io/releases/1.0.4/aframe.min.js"></script>
-
-    <!-- LOCATION-ONLY GPS BUILD (correct for gps-new-*) -->
-    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-location-only.js"></script>
+    <!-- Use the same versions as the official tutorial -->
+    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+    <script type="text/javascript" src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/three.js/build/ar-threex-location-only.js"></script>
+    <script type="text/javascript" src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/aframe/build/aframe-ar.js"></script>
 
     <style>
       #debug {
         position: fixed;
-        bottom: 10px;
         left: 10px;
+        bottom: 10px;
         z-index: 9999;
         background: rgba(0,0,0,0.75);
         color: #fff;
         padding: 10px 12px;
         border-radius: 10px;
         font-size: 12px;
-        font-family: system-ui, sans-serif;
+        line-height: 1.4;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        white-space: pre-wrap;
       }
     </style>
   </head>
@@ -29,37 +31,59 @@
     <div id="debug">waiting for GPS…</div>
 
     <a-scene
-      embedded
-      vr-mode-ui="enabled:false"
-      renderer="logarithmicDepthBuffer:true"
+      vr-mode-ui="enabled: false"
+      arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
+      renderer="antialias: true; alpha: true;"
     >
-      <!-- GUARANTEED VISIBLE OBJECT -->
-      <a-box
-        gps-new-entity-place="latitude: 34.840041; longitude: 134.161985;"
-        position="0 1.6 -3"
-        depth="2"
-        height="2"
-        width="2"
-        color="red"
-      ></a-box>
-
-      <a-camera gps-new-camera></a-camera>
+      <a-camera gps-new-camera="gpsMinDistance: 0"></a-camera>
     </a-scene>
 
     <script>
       const debug = document.getElementById("debug");
+      let added = false;
 
-      navigator.geolocation.watchPosition(
-        p => {
-          const { latitude, longitude, accuracy } = p.coords;
+      window.addEventListener("error", (e) => {
+        debug.textContent =
+          "JS ERROR:\n" +
+          (e.message || "unknown") +
+          (e.filename ? ("\n" + e.filename + ":" + e.lineno + ":" + e.colno) : "");
+      });
+
+      window.addEventListener("unhandledrejection", (e) => {
+        debug.textContent =
+          "PROMISE REJECTION:\n" + (e.reason ? (e.reason.message || e.reason) : "unknown");
+      });
+
+      // Wait until AR.js emits a real GPS fix, then place the box a bit north.
+      window.onload = () => {
+        const cam = document.querySelector("[gps-new-camera]");
+        cam.addEventListener("gps-camera-update-position", (e) => {
+          const lat = e.detail.position.latitude;
+          const lon = e.detail.position.longitude;
+
           debug.textContent =
-            "lat: " + latitude.toFixed(6) + "\n" +
-            "lon: " + longitude.toFixed(6) + "\n" +
-            "accuracy: " + Math.round(accuracy) + "m";
-        },
-        e => debug.textContent = e.message,
-        { enableHighAccuracy: true }
-      );
+            "GPS OK\n" +
+            "lat: " + lat.toFixed(6) + "\n" +
+            "lon: " + lon.toFixed(6) + "\n" +
+            "Tip: look NORTH for the red box (~111m).";
+
+          if (added) return;
+          added = true;
+
+          // Big red box ~0.001 degrees north (recommended style in the docs)
+          const box = document.createElement("a-box");
+          box.setAttribute("color", "red");
+          box.setAttribute("depth", "10");
+          box.setAttribute("height", "10");
+          box.setAttribute("width", "10");
+          box.setAttribute("gps-new-entity-place", {
+            latitude: lat + 0.001,
+            longitude: lon
+          });
+
+          document.querySelector("a-scene").appendChild(box);
+        });
+      };
     </script>
   </body>
 </html>
