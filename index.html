@@ -4,86 +4,117 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
 
-    <!-- Use the same versions as the official tutorial -->
-    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
-    <script type="text/javascript" src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/three.js/build/ar-threex-location-only.js"></script>
-    <script type="text/javascript" src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/aframe/build/aframe-ar.js"></script>
+    <script src="https://aframe.io/releases/1.0.4/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
 
     <style>
-      #debug {
-        position: fixed;
-        left: 10px;
-        bottom: 10px;
-        z-index: 9999;
-        background: rgba(0,0,0,0.75);
-        color: #fff;
-        padding: 10px 12px;
-        border-radius: 10px;
-        font-size: 12px;
-        line-height: 1.4;
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      body { margin:0; overflow:hidden; background:#000; }
+      #panel {
+        position: fixed; left: 10px; top: 10px; z-index: 9999;
+        background: rgba(0,0,0,0.75); color: #fff;
+        padding: 10px 12px; border-radius: 10px;
+        font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        max-width: calc(100vw - 20px);
         white-space: pre-wrap;
+      }
+      #panel b { font-weight: 700; }
+      #startBtn {
+        position: fixed; right: 10px; top: 10px; z-index: 10000;
+        padding: 10px 12px; border-radius: 10px;
+        border: 0; background: rgba(255,255,255,0.9); color: #000;
+        font-size: 14px;
       }
     </style>
   </head>
 
-  <body style="margin:0; overflow:hidden;">
-    <div id="debug">waiting for GPS…</div>
+  <body>
+    <button id="startBtn">Tap to start</button>
+    <div id="panel">loading…</div>
 
     <a-scene
-      vr-mode-ui="enabled: false"
-      arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
-      renderer="antialias: true; alpha: true;"
+      embedded
+      vr-mode-ui="enabled:false"
+      renderer="alpha:true; antialias:true; logarithmicDepthBuffer:true;"
+      arjs="sourceType:webcam; videoTexture:true; facingMode:environment; debugUIEnabled:false; gpsMinDistance:0; gpsTimeInterval:1000;"
     >
-      <a-camera gps-new-camera="gpsMinDistance: 0"></a-camera>
+      <a-assets>
+        <!-- Use an ABSOLUTE path so GitHub Pages subfolder deployments don’t break -->
+        <a-asset-item id="model" src="./assets/ice_cream_girl.glb"></a-asset-item>
+      </a-assets>
+
+      <!-- Big red box (should show even if GLB fails) -->
+      <a-box
+        gps-entity-place="latitude: 34.840041; longitude: 134.161985;"
+        position="0 1.6 -3"
+        depth="2" height="2" width="2"
+        color="red"
+      ></a-box>
+
+      <!-- Your GLB -->
+      <a-entity
+        gps-entity-place="latitude: 34.840041; longitude: 134.161985;"
+        gltf-model="#model"
+        position="0 1.6 -3"
+        scale="10 10 10"
+      ></a-entity>
+
+      <a-camera gps-camera rotation-reader></a-camera>
     </a-scene>
 
     <script>
-      const debug = document.getElementById("debug");
-      let added = false;
+      const panel = document.getElementById("panel");
+      const startBtn = document.getElementById("startBtn");
 
+      function line(label, value) { return `${label}: ${value}\n`; }
+
+      // Show errors
       window.addEventListener("error", (e) => {
-        debug.textContent =
-          "JS ERROR:\n" +
-          (e.message || "unknown") +
-          (e.filename ? ("\n" + e.filename + ":" + e.lineno + ":" + e.colno) : "");
+        panel.textContent = "JS ERROR:\n" + (e.message || "unknown") +
+          (e.filename ? `\n${e.filename}:${e.lineno}:${e.colno}` : "");
       });
-
       window.addEventListener("unhandledrejection", (e) => {
-        debug.textContent =
-          "PROMISE REJECTION:\n" + (e.reason ? (e.reason.message || e.reason) : "unknown");
+        panel.textContent = "PROMISE REJECTION:\n" + (e.reason ? (e.reason.message || e.reason) : "unknown");
       });
 
-      // Wait until AR.js emits a real GPS fix, then place the box a bit north.
-      window.onload = () => {
-        const cam = document.querySelector("[gps-new-camera]");
-        cam.addEventListener("gps-camera-update-position", (e) => {
-          const lat = e.detail.position.latitude;
-          const lon = e.detail.position.longitude;
+      // Asset load status
+      const asset = document.getElementById("model");
+      asset.addEventListener("loaded", () => {
+        // Note: "loaded" fires when the asset tag loads; the GLB could still be empty, but 404 won't load.
+      });
 
-          debug.textContent =
-            "GPS OK\n" +
-            "lat: " + lat.toFixed(6) + "\n" +
-            "lon: " + lon.toFixed(6) + "\n" +
-            "Tip: look NORTH for the red box (~111m).";
+      // GPS + camera status loop
+      navigator.geolocation.watchPosition(
+        (p) => {
+          const { latitude, longitude, accuracy } = p.coords;
+          const vid = document.querySelector("video");
+          const vidState = vid
+            ? `present, readyState=${vid.readyState}, paused=${vid.paused}`
+            : "NOT FOUND";
 
-          if (added) return;
-          added = true;
+          panel.textContent =
+            line("URL", location.href) +
+            line("HTTPS", location.protocol) +
+            line("GPS lat", latitude.toFixed(6)) +
+            line("GPS lon", longitude.toFixed(6)) +
+            line("Accuracy", Math.round(accuracy) + "m") +
+            line("Video", vidState) +
+            line("Model src", asset.getAttribute("src"));
+        },
+        (e) => {
+          panel.textContent = "GEOLOCATION ERROR:\n" + e.message;
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+      );
 
-          // Big red box ~0.001 degrees north (recommended style in the docs)
-          const box = document.createElement("a-box");
-          box.setAttribute("color", "red");
-          box.setAttribute("depth", "10");
-          box.setAttribute("height", "10");
-          box.setAttribute("width", "10");
-          box.setAttribute("gps-new-entity-place", {
-            latitude: lat + 0.001,
-            longitude: lon
-          });
-
-          document.querySelector("a-scene").appendChild(box);
-        });
-      };
+      // iOS often needs a user gesture to start camera reliably
+      startBtn.addEventListener("click", async () => {
+        startBtn.style.display = "none";
+        try {
+          await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+        } catch (e) {
+          // If blocked, you'll still see camera state in the panel (Video: NOT FOUND or paused=true)
+        }
+      });
     </script>
   </body>
 </html>
