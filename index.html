@@ -47,23 +47,29 @@
 
       <!-- GPS anchor -->
       <a-entity gps-entity-place="latitude: 34.840041; longitude: 134.161985;">
-        <!-- BIG + HIGH debug model (guaranteed visible) -->
+        <!-- Forced in-front placement (guaranteed visible when rendering works) -->
         <a-entity
           id="model"
           gltf-model="#animated-asset"
           animation-mixer="loop: repeat"
-          position="0 10 0"
-          scale="20 20 20"
-          look-at="[gps-camera]"
+          position="0 1.6 -3"
+          scale="10 10 10"
         ></a-entity>
+
+        <!-- Optional: Uncomment to sanity-check rendering with a simple primitive -->
+        
+        <a-box position="0 1.6 -3" depth="1" height="1" width="1" color="red"></a-box>
+        
       </a-entity>
 
       <a-camera gps-camera rotation-reader></a-camera>
     </a-scene>
 
     <script>
+      // Target coordinate (edit these when you move the center)
       const TARGET_LAT = 34.840041;
       const TARGET_LON = 134.161985;
+
       const debug = document.getElementById("debug");
 
       function dist(a,b,c,d){
