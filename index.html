@@ -4,29 +4,33 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
 
-    <!-- Proven stable versions for iOS -->
-    <script src="https://aframe.io/releases/1.0.4/aframe.min.js"></script>
-    <script src="https://raw.githack.com/AR-js-org/AR.js/3.3.2/aframe/build/aframe-ar.js"></script>
+    <!-- Use ONE CDN (jsDelivr) to avoid “Script error.” / CORS hiding real errors -->
+    <script src="https://cdn.jsdelivr.net/npm/aframe@1.0.4/dist/aframe.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ar.js@3.3.2/aframe/build/aframe-ar.js" crossorigin="anonymous"></script>
 
     <style>
-      body { margin:0; overflow:hidden; background:#000; }
+      html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
+
+      /* Make sure overlay is ALWAYS visible above the AR canvas */
       #panel {
         position: fixed;
         left: 10px;
         top: 10px;
-        z-index: 9999;
-        background: rgba(0,0,0,0.75);
+        z-index: 2147483647;  /* max */
+        background: rgba(0,0,0,0.85);
         color: #fff;
         padding: 10px 12px;
         border-radius: 10px;
         font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
         white-space: pre-wrap;
+        pointer-events: none;
       }
+
       #startBtn {
         position: fixed;
         right: 10px;
         top: 10px;
-        z-index: 10000;
+        z-index: 2147483647;  /* max */
         padding: 10px 12px;
         border-radius: 10px;
         border: 0;
@@ -38,16 +42,17 @@
   </head>
 
   <body>
+    <!-- If you don't see this panel, your HTML file is not the one being loaded -->
+    <div id="panel">BOOTING…</div>
     <button id="startBtn">Tap to start</button>
-    <div id="panel">waiting…</div>
 
     <a-scene
       embedded
       vr-mode-ui="enabled:false"
       renderer="alpha:true; antialias:true"
-      arjs="sourceType: webcam; videoTexture:true; facingMode:environment; debugUIEnabled:false;"
+      arjs="sourceType:webcam; videoTexture:true; facingMode:environment; debugUIEnabled:false;"
     >
-      <!-- CONTROL: must always show -->
+      <!-- Local control cube (always visible if A-Frame rendering is alive) -->
       <a-box position="0 1.6 -2" depth="0.6" height="0.6" width="0.6" color="yellow"></a-box>
 
       <a-camera gps-camera rotation-reader></a-camera>
@@ -58,52 +63,68 @@
       const startBtn = document.getElementById("startBtn");
       const scene = document.querySelector("a-scene");
 
-      function status(text){ panel.textContent = text; }
+      function log(txt){ panel.textContent = txt; }
+
+      // If this fires, you WILL see it on screen (proves JS is running)
+      log("BOOT OK\nWaiting for permissions…");
+
+      // Show errors (no more silent failures)
+      window.onerror = function (msg, src, line, col) {
+        log("JS ERROR:\n" + msg + "\n" + (src ? `${src}:${line}:${col}` : ""));
+      };
+      window.addEventListener("unhandledrejection", (e) => {
+        log("PROMISE REJECTION:\n" + (e.reason?.message || e.reason || "unknown"));
+      });
 
       startBtn.addEventListener("click", async () => {
         startBtn.style.display = "none";
         try {
           await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio:false });
-        } catch (_) {}
+          log("Camera permission OK.\nWaiting for GPS fix…");
+        } catch (e) {
+          log("getUserMedia failed:\n" + (e.name || "") + " " + (e.message || e));
+        }
       });
 
       let spawned = false;
 
       window.addEventListener("load", () => {
         const cam = document.querySelector("[gps-camera]");
-        if (!cam) return status("gps-camera not found");
+        if (!cam) {
+          log("ERROR: gps-camera not found.\nAR.js did not initialize.");
+          return;
+        }
+
+        log("AR.js loaded.\nTap 'Tap to start' then allow Camera + Location.");
 
         cam.addEventListener("gps-camera-update-position", (e) => {
           const lat = e.detail.position.latitude;
           const lon = e.detail.position.longitude;
 
-          status(
+          log(
             "GPS FIX OK\n" +
             "lat: " + lat.toFixed(6) + "\n" +
             "lon: " + lon.toFixed(6) + "\n\n" +
-            "Spawning 4 huge pillars ~20m away.\nRotate slowly 360°."
+            "Spawning 4 huge pillars ~20m away.\nRotate 360° slowly."
           );
 
           if (spawned) return;
           spawned = true;
 
-          // ~20m offsets
+          // ~20m offsets (approx)
           const dLat = 0.00018;
           const dLon = 0.00022;
 
           const targets = [
-            { la: lat + dLat, lo: lon,         c: "red",   name: "N" },
-            { la: lat - dLat, lo: lon,         c: "green", name: "S" },
-            { la: lat,        lo: lon + dLon,  c: "blue",  name: "E" },
-            { la: lat,        lo: lon - dLon,  c: "orange",name: "W" },
+            { la: lat + dLat, lo: lon,        c: "red",    name: "N" },
+            { la: lat - dLat, lo: lon,        c: "green",  name: "S" },
+            { la: lat,        lo: lon + dLon, c: "blue",   name: "E" },
+            { la: lat,        lo: lon - dLon, c: "orange", name: "W" },
           ];
 
           targets.forEach(t => {
             const pillar = document.createElement("a-cylinder");
-            pillar.setAttribute("gps-entity-place", {
-              latitude: t.la,
-              longitude: t.lo
-            });
+            pillar.setAttribute("gps-entity-place", { latitude: t.la, longitude: t.lo });
             pillar.setAttribute("position", "0 10 0");
             pillar.setAttribute("radius", "2");
             pillar.setAttribute("height", "20");
