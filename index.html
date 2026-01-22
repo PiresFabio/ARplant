@@ -2,6 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
 
     <script src="https://aframe.io/releases/1.0.4/aframe.min.js"></script>
@@ -17,7 +18,6 @@
         max-width: calc(100vw - 20px);
         white-space: pre-wrap;
       }
-      #panel b { font-weight: 700; }
       #startBtn {
         position: fixed; right: 10px; top: 10px; z-index: 10000;
         padding: 10px 12px; border-radius: 10px;
@@ -38,11 +38,10 @@
       arjs="sourceType:webcam; videoTexture:true; facingMode:environment; debugUIEnabled:false; gpsMinDistance:0; gpsTimeInterval:1000;"
     >
       <a-assets>
-        <!-- Use an ABSOLUTE path so GitHub Pages subfolder deployments don’t break -->
         <a-asset-item id="model" src="./assets/ice_cream_girl.glb"></a-asset-item>
       </a-assets>
 
-      <!-- Big red box (should show even if GLB fails) -->
+      <!-- ✅ Red box (proves GPS + render works) -->
       <a-box
         gps-entity-place="latitude: 34.840041; longitude: 134.161985;"
         position="0 1.6 -3"
@@ -50,13 +49,19 @@
         color="red"
       ></a-box>
 
-      <!-- Your GLB -->
+      <!-- ✅ GLB wrapper (fixes pivot/scale/visibility issues) -->
       <a-entity
-        gps-entity-place="latitude: 34.840041; longitude: 134.161985;"
-        gltf-model="#model"
-        position="0 1.6 -3"
-        scale="10 10 10"
-      ></a-entity>
+        gps-entity-place="latitude: 34.840193956918114; 134.1621670375518;"
+        position="0 0 0"
+      >
+        <a-entity
+          gltf-model="#model"
+          position="0 1.6 -3"
+          scale="100 100 100"
+          rotation="0 180 0"
+          material="side: double; transparent: false; opacity: 1"
+        ></a-entity>
+      </a-entity>
 
       <a-camera gps-camera rotation-reader></a-camera>
     </a-scene>
@@ -64,25 +69,29 @@
     <script>
       const panel = document.getElementById("panel");
       const startBtn = document.getElementById("startBtn");
+      const asset = document.getElementById("model");
 
       function line(label, value) { return `${label}: ${value}\n`; }
 
-      // Show errors
       window.addEventListener("error", (e) => {
-        panel.textContent = "JS ERROR:\n" + (e.message || "unknown") +
+        panel.textContent =
+          "JS ERROR:\n" +
+          (e.message || "unknown") +
           (e.filename ? `\n${e.filename}:${e.lineno}:${e.colno}` : "");
       });
+
       window.addEventListener("unhandledrejection", (e) => {
-        panel.textContent = "PROMISE REJECTION:\n" + (e.reason ? (e.reason.message || e.reason) : "unknown");
+        panel.textContent =
+          "PROMISE REJECTION:\n" +
+          (e.reason ? (e.reason.message || e.reason) : "unknown");
       });
 
-      // Asset load status
-      const asset = document.getElementById("model");
+      // Show model load events (helps confirm GLB path is correct)
       asset.addEventListener("loaded", () => {
-        // Note: "loaded" fires when the asset tag loads; the GLB could still be empty, but 404 won't load.
+        panel.textContent += "\nMODEL TAG LOADED (asset-item)\n";
       });
 
-      // GPS + camera status loop
+      // GPS + camera status
       navigator.geolocation.watchPosition(
         (p) => {
           const { latitude, longitude, accuracy } = p.coords;
@@ -110,9 +119,12 @@
       startBtn.addEventListener("click", async () => {
         startBtn.style.display = "none";
         try {
-          await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+          await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "environment" },
+            audio: false
+          });
         } catch (e) {
-          // If blocked, you'll still see camera state in the panel (Video: NOT FOUND or paused=true)
+          // If blocked, you’ll usually see it in the panel (Video: NOT FOUND / paused=true)
         }
       });
     </script>
