@@ -4,177 +4,201 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
 
-    <!-- A-Frame -->
     <script src="https://cdn.jsdelivr.net/npm/aframe@1.0.4/dist/aframe.min.js" crossorigin="anonymous"></script>
-
-    <!-- AR.js ONLY for gps-camera / gps-entity-place components (we will NOT use its webcam pipeline) -->
     <script src="https://cdn.jsdelivr.net/npm/ar.js@3.3.2/aframe/build/aframe-ar.js" crossorigin="anonymous"></script>
 
     <style>
       html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
 
-      /* Real camera background (we control this, not AR.js) */
+      /* manual camera background */
       #bgVideo {
-        position: fixed;
-        inset: 0;
-        width: 100vw;
-        height: 100vh;
+        position: fixed; inset: 0;
+        width: 100vw; height: 100vh;
         object-fit: cover;
         z-index: 1;
         background: #000;
       }
 
-      /* A-Frame canvas sits on top */
-      a-scene {
-        position: fixed !important;
-        inset: 0 !important;
-        z-index: 2 !important;
-      }
+      /* A-Frame on top */
+      a-scene { position: fixed !important; inset: 0 !important; z-index: 2 !important; }
 
       #panel {
-        position: fixed;
-        left: 10px;
-        top: 10px;
-        z-index: 2147483647;
-        background: rgba(0,0,0,0.85);
-        color: #fff;
-        padding: 10px 12px;
-        border-radius: 10px;
+        position: fixed; left: 10px; top: 10px; z-index: 2147483647;
+        background: rgba(0,0,0,0.85); color:#fff;
+        padding: 10px 12px; border-radius: 10px;
         font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
         white-space: pre-wrap;
         pointer-events: none;
         max-width: calc(100vw - 20px);
       }
-
       #startBtn {
-        position: fixed;
-        right: 10px;
-        top: 10px;
-        z-index: 2147483647;
-        padding: 10px 12px;
-        border-radius: 10px;
-        border: 0;
-        background: rgba(255,255,255,0.92);
-        color: #000;
-        font-size: 14px;
+        position: fixed; right: 10px; top: 10px; z-index: 2147483647;
+        padding: 10px 12px; border-radius: 10px;
+        border: 0; background: rgba(255,255,255,0.92);
+        color:#000; font-size: 14px;
       }
     </style>
   </head>
 
   <body>
-    <!-- Manual camera feed -->
     <video id="bgVideo" autoplay playsinline muted></video>
-
     <div id="panel">BOOTING…</div>
-    <button id="startBtn">Tap to start camera</button>
+    <button id="startBtn">Tap to start</button>
 
-    <!-- Transparent A-Frame overlay -->
-    <a-scene
-      embedded
-      vr-mode-ui="enabled:false"
-      renderer="alpha:true; antialias:true"
-    >
-      <!-- Control cube (always visible) -->
-      <a-box position="0 1.6 -2" depth="0.6" height="0.6" width="0.6" color="yellow"></a-box>
+    <a-scene embedded vr-mode-ui="enabled:false" renderer="alpha:true; antialias:true">
+      <!-- “Pointer” rig attached to camera space -->
+      <a-entity id="pointerRig" position="0 1.6 -2">
+        <!-- Yellow cube: we’ll rotate this to “point” toward target -->
+        <a-box id="pointerBox" depth="0.35" height="0.35" width="0.8" color="yellow"></a-box>
 
-      <!-- Camera entity (just for view) -->
+        <!-- A little cone on the front so it looks like an arrow -->
+        <a-cone id="pointerTip" position="0 0 -0.6" radius-bottom="0.18" radius-top="0" height="0.35" color="yellow"></a-cone>
+      </a-entity>
+
+      <!-- optional: a small horizon line so you see rotation -->
+      <a-ring position="0 1.6 -2.2" radius-inner="0.45" radius-outer="0.47" color="white" opacity="0.5"></a-ring>
+
       <a-camera gps-camera rotation-reader></a-camera>
     </a-scene>
 
     <script>
+      const bgVideo = document.getElementById("bgVideo");
       const panel = document.getElementById("panel");
       const startBtn = document.getElementById("startBtn");
-      const bgVideo = document.getElementById("bgVideo");
-      const scene = document.querySelector("a-scene");
 
-      function show(msg) { panel.textContent = msg; }
+      const pointerRig = document.getElementById("pointerRig"); // we rotate this
+      const pointerBox = document.getElementById("pointerBox");
+
+      // ✅ Set your target coordinate here
+      const TARGET_LAT = 34.840041;
+      const TARGET_LON = 134.161985;
+
+      function show(msg){ panel.textContent = msg; }
 
       window.onerror = function (msg, src, line, col) {
         show("JS ERROR:\n" + msg + "\n" + (src ? `${src}:${line}:${col}` : ""));
       };
-      window.addEventListener("unhandledrejection", (e) => {
-        show("PROMISE REJECTION:\n" + (e.reason?.message || e.reason || "unknown"));
-      });
 
-      let spawned = false;
+      // ----- math helpers -----
+      const toRad = d => d * Math.PI / 180;
+      const toDeg = r => r * 180 / Math.PI;
 
-      async function startCamera() {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: { ideal: "environment" } },
-            audio: false
-          });
-          bgVideo.srcObject = stream;
-
-          show("Camera OK.\nWaiting for GPS fix…");
-          return true;
-        } catch (e) {
-          show("Camera FAILED:\n" + (e.name || "") + "\n" + (e.message || e) +
-               "\n\nFix:\n- iPhone Settings → Safari → Camera: Allow\n- Open in Safari (not LINE/Slack browser)");
-          return false;
-        }
+      function distanceMeters(lat1, lon1, lat2, lon2) {
+        const R = 6371000;
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+        const a =
+          Math.sin(dLat/2) ** 2 +
+          Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * (Math.sin(dLon/2) ** 2);
+        return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       }
 
-      // Force GPS permission prompt + show exact GPS errors
-      function startGPS() {
-        navigator.geolocation.watchPosition(
-          (p) => {
-            const { latitude, longitude, accuracy } = p.coords;
+      // bearing from point1 to point2 (0°=North, 90°=East)
+      function bearingDeg(lat1, lon1, lat2, lon2) {
+        const φ1 = toRad(lat1), φ2 = toRad(lat2);
+        const Δλ = toRad(lon2 - lon1);
+        const y = Math.sin(Δλ) * Math.cos(φ2);
+        const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+        let θ = toDeg(Math.atan2(y, x)); // -180..180
+        θ = (θ + 360) % 360;            // 0..360
+        return θ;
+      }
 
-            show(
-              "GPS OK\n" +
-              "lat: " + latitude.toFixed(6) + "\n" +
-              "lon: " + longitude.toFixed(6) + "\n" +
-              "accuracy: " + Math.round(accuracy) + "m\n\n" +
-              "If pillars spawn, rotate 360° slowly."
-            );
+      // Try to read device heading.
+      // On iOS, Geolocation heading is often null; we try DeviceOrientationEvent.
+      let deviceHeading = null; // degrees, 0..360 (0=N)
+      function setupDeviceHeading() {
+        window.addEventListener("deviceorientationabsolute", (e) => {
+          if (typeof e.alpha === "number") {
+            // alpha is 0..360, but depends on implementation; treat as compass heading-ish
+            deviceHeading = e.alpha;
+          }
+        }, true);
 
-            if (spawned) return;
-            spawned = true;
+        window.addEventListener("deviceorientation", (e) => {
+          if (deviceHeading == null && typeof e.alpha === "number") {
+            deviceHeading = e.alpha;
+          }
+        }, true);
+      }
 
-            // Spawn 4 pillars around CURRENT position (~20m)
-            const dLat = 0.00018;
-            const dLon = 0.00022;
+      async function requestMotionPermissionIfNeeded() {
+        try {
+          if (typeof DeviceOrientationEvent !== "undefined" &&
+              typeof DeviceOrientationEvent.requestPermission === "function") {
+            const res = await DeviceOrientationEvent.requestPermission();
+            return res === "granted";
+          }
+        } catch (_) {}
+        return true;
+      }
 
-            const targets = [
-              { la: latitude + dLat, lo: longitude,        c: "red",    name: "N" },
-              { la: latitude - dLat, lo: longitude,        c: "green",  name: "S" },
-              { la: latitude,        lo: longitude + dLon, c: "blue",   name: "E" },
-              { la: latitude,        lo: longitude - dLon, c: "orange", name: "W" },
-            ];
+      async function startCamera() {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+          audio: false
+        });
+        bgVideo.srcObject = stream;
+      }
 
-            targets.forEach(t => {
-              const pillar = document.createElement("a-cylinder");
-              pillar.setAttribute("gps-entity-place", { latitude: t.la, longitude: t.lo });
-              pillar.setAttribute("position", "0 10 0");
-              pillar.setAttribute("radius", "2");
-              pillar.setAttribute("height", "20");
-              pillar.setAttribute("color", t.c);
+      function updatePointer(lat, lon, acc) {
+        const dist = distanceMeters(lat, lon, TARGET_LAT, TARGET_LON);
+        const brg = bearingDeg(lat, lon, TARGET_LAT, TARGET_LON); // 0=N
 
-              const label = document.createElement("a-text");
-              label.setAttribute("value", t.name);
-              label.setAttribute("align", "center");
-              label.setAttribute("color", "#fff");
-              label.setAttribute("position", "0 12 0");
-              pillar.appendChild(label);
+        // If we have deviceHeading, we can point relative to where you're facing:
+        // relative = bearing - heading
+        let rel = null;
+        if (typeof deviceHeading === "number") {
+          rel = (brg - deviceHeading + 360) % 360; // 0=forward, 90=right
+          // rotate the pointer rig around Y (A-Frame uses Y up; yaw rotation)
+          pointerRig.setAttribute("rotation", `0 ${rel} 0`);
+        } else {
+          // No heading: still show numbers; keep pointer fixed
+          pointerRig.setAttribute("rotation", "0 0 0");
+        }
 
-              scene.appendChild(pillar);
-            });
-          },
-          (e) => {
-            show("GPS ERROR:\n" + e.code + " - " + e.message +
-                 "\n\nFix:\n- Settings → Privacy & Security → Location Services: ON\n- Safari → Location: Allow\n- Precise Location: ON");
-          },
-          { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+        // make pointer bigger when far, smaller when close (visual cue)
+        const s = Math.min(2.5, Math.max(0.7, dist / 20));
+        pointerRig.setAttribute("scale", `${s} ${s} ${s}`);
+
+        show(
+          "TARGET\n" +
+          `lat: ${TARGET_LAT}\nlon: ${TARGET_LON}\n\n` +
+          "YOU\n" +
+          `lat: ${lat.toFixed(6)}\nlon: ${lon.toFixed(6)}\naccuracy: ${Math.round(acc)}m\n\n` +
+          `distance: ${Math.round(dist)}m\n` +
+          `bearing (N=0,E=90): ${Math.round(brg)}°\n` +
+          (rel == null
+            ? "heading: (not available) → enable Motion & Orientation\n"
+            : `heading: ${Math.round(deviceHeading)}°\nrelative: ${Math.round(rel)}° (0=forward, 90=right)\n`) +
+          "\nHow to use:\n" +
+          "- If relative is ~0°, target is straight ahead.\n" +
+          "- If ~90°, target is to your RIGHT.\n" +
+          "- If ~270°, target is to your LEFT.\n"
         );
       }
 
-      show("BOOT OK.\nTap the button to start camera.\n(You already have GPS permission, but we’ll request it anyway.)");
-
       startBtn.addEventListener("click", async () => {
         startBtn.style.display = "none";
-        const camOK = await startCamera();
-        if (camOK) startGPS();
+
+        const motionOK = await requestMotionPermissionIfNeeded();
+        if (!motionOK) show("Motion permission denied. Pointer can’t aim. Enable it in Settings.");
+
+        setupDeviceHeading();
+
+        try {
+          await startCamera();
+        } catch (e) {
+          show("Camera failed: " + (e.message || e));
+          return;
+        }
+
+        // Force GPS permission prompt and update pointer continuously
+        navigator.geolocation.watchPosition(
+          (p) => updatePointer(p.coords.latitude, p.coords.longitude, p.coords.accuracy),
+          (e) => show("GPS ERROR: " + e.message),
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+        );
       });
     </script>
   </body>
